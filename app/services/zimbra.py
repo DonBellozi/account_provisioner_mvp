@@ -20,6 +20,32 @@ class ZimbraService:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    def _read_ssh_password(self) -> str:
+        if self.settings.zimbra_ssh_password_file:
+            password_file = Path(self.settings.zimbra_ssh_password_file)
+            if not password_file.is_file():
+                raise RuntimeError("Не найден файл с SSH-паролем Zimbra")
+            password = password_file.read_text(encoding="utf-8").rstrip("\r\n")
+        else:
+            password = self.settings.zimbra_ssh_password
+
+        if not password:
+            raise RuntimeError(
+                "Не задан SSH-пароль Zimbra: укажите ZIMBRA_SSH_PASSWORD "
+                "или ZIMBRA_SSH_PASSWORD_FILE"
+            )
+        return password
+
+    def _resolve_ssh_auth(self) -> str:
+        auth = self.settings.zimbra_ssh_auth
+        if auth != "auto":
+            return auth
+
+        private_key = Path(self.settings.zimbra_ssh_private_key)
+        if self.settings.zimbra_ssh_private_key and private_key.is_file():
+            return "key"
+        return "password"
+
     def _client(self) -> paramiko.SSHClient:
         client = paramiko.SSHClient()
         known_hosts = Path(self.settings.zimbra_ssh_known_hosts)
@@ -27,17 +53,34 @@ class ZimbraService:
             raise RuntimeError("Не найден файл known_hosts для Zimbra")
         client.load_host_keys(str(known_hosts))
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        client.connect(
-            hostname=self.settings.zimbra_ssh_host,
-            port=self.settings.zimbra_ssh_port,
-            username=self.settings.zimbra_ssh_user,
-            key_filename=self.settings.zimbra_ssh_private_key,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=10,
-            banner_timeout=10,
-            auth_timeout=10,
-        )
+
+        connect_kwargs: dict[str, object] = {
+            "hostname": self.settings.zimbra_ssh_host,
+            "port": self.settings.zimbra_ssh_port,
+            "username": self.settings.zimbra_ssh_user,
+            "look_for_keys": False,
+            "allow_agent": False,
+            "timeout": 10,
+            "banner_timeout": 10,
+            "auth_timeout": 10,
+        }
+
+        auth = self._resolve_ssh_auth()
+        if auth == "key":
+            private_key = Path(self.settings.zimbra_ssh_private_key)
+            if not private_key.is_file():
+                raise RuntimeError("Не найден закрытый SSH-ключ Zimbra")
+            connect_kwargs["key_filename"] = str(private_key)
+        elif auth == "password":
+            connect_kwargs["password"] = self._read_ssh_password()
+        else:
+            raise RuntimeError(f"Неизвестный режим SSH-аутентификации Zimbra: {auth}")
+
+        try:
+            client.connect(**connect_kwargs)
+        except Exception:
+            client.close()
+            raise
         return client
 
     def _run_zmprov(self, args: list[str], allow_not_found: bool = False) -> str:

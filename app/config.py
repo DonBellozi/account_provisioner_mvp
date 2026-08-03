@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     zimbra_ssh_host: str = ""
     zimbra_ssh_port: int = 22
     zimbra_ssh_user: str = "provisioner"
+    zimbra_ssh_auth: Literal["key", "password", "auto"] = "key"
     zimbra_ssh_private_key: str = "/run/secrets/zimbra_ssh_key"
+    zimbra_ssh_password: str = ""
+    zimbra_ssh_password_file: str = ""
     zimbra_ssh_known_hosts: str = "/app/known_hosts"
     zimbra_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     zimbra_domain_mode: Literal["separate", "primary_alias"] = "separate"

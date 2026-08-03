@@ -1,0 +1,73 @@
+services:
+  account-provisioner:
+    build:
+      context: .
+    container_name: account-provisioner
+    restart: unless-stopped
+    environment:
+      APP_NAME: "${APP_NAME:-Регистрация учетных записей}"
+      APP_SECRET_KEY: "${APP_SECRET_KEY:-change-me-to-a-long-random-secret}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      APP_TIMEZONE: "${APP_TIMEZONE:-Europe/Moscow}"
+      DATABASE_URL: "sqlite:///./data/app.db"
+      DRY_RUN: "${DRY_RUN:-true}"
+
+      BOOTSTRAP_ADMIN_USERNAME: "${BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      BOOTSTRAP_ADMIN_PASSWORD: "${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMeNow!123}"
+
+      AUTH_MODE: "${AUTH_MODE:-local}"
+      AD_LOGIN_ENABLED: "${AD_LOGIN_ENABLED:-false}"
+      AD_ALLOWED_GROUP_DN: "${AD_ALLOWED_GROUP_DN:-}"
+
+      AD_SERVER: "${AD_SERVER:-}"
+      AD_PORT: "${AD_PORT:-636}"
+      AD_USE_SSL: "${AD_USE_SSL:-true}"
+      AD_VERIFY_TLS: "${AD_VERIFY_TLS:-true}"
+      AD_CA_CERT_FILE: "${AD_CA_CERT_FILE:-}"
+      AD_DOMAIN: "${AD_DOMAIN:-}"
+      AD_BASE_DN: "${AD_BASE_DN:-}"
+      AD_USERS_OU: "${AD_USERS_OU:-}"
+      AD_BIND_DN: "${AD_BIND_DN:-}"
+      AD_BIND_PASSWORD: "${AD_BIND_PASSWORD:-}"
+      AD_UPN_SUFFIX: "${AD_UPN_SUFFIX:-}"
+      AD_FORCE_CHANGE_AT_FIRST_LOGON: "${AD_FORCE_CHANGE_AT_FIRST_LOGON:-true}"
+      AD_DEFAULT_GROUP_DNS: "${AD_DEFAULT_GROUP_DNS:-}"
+
+      ZIMBRA_BACKEND: "${ZIMBRA_BACKEND:-ssh_zmprov}"
+      ZIMBRA_SSH_HOST: "${ZIMBRA_SSH_HOST:-}"
+      ZIMBRA_SSH_PORT: "${ZIMBRA_SSH_PORT:-22}"
+      ZIMBRA_SSH_USER: "${ZIMBRA_SSH_USER:-provisioner}"
+      ZIMBRA_SSH_AUTH: "${ZIMBRA_SSH_AUTH:-key}"
+      ZIMBRA_SSH_PRIVATE_KEY: "${ZIMBRA_SSH_PRIVATE_KEY:-/run/secrets/zimbra_ssh_key}"
+      ZIMBRA_SSH_PASSWORD: "${ZIMBRA_SSH_PASSWORD:-}"
+      ZIMBRA_SSH_PASSWORD_FILE: "${ZIMBRA_SSH_PASSWORD_FILE:-}"
+      ZIMBRA_SSH_KNOWN_HOSTS: "${ZIMBRA_SSH_KNOWN_HOSTS:-/app/known_hosts}"
+      ZIMBRA_DOMAINS: "${ZIMBRA_DOMAINS:-example.ru,example.com}"
+      ZIMBRA_DOMAIN_MODE: "${ZIMBRA_DOMAIN_MODE:-separate}"
+      ZIMBRA_PRIMARY_DOMAIN: "${ZIMBRA_PRIMARY_DOMAIN:-example.ru}"
+      ZIMBRA_CREATE_ALIASES: "${ZIMBRA_CREATE_ALIASES:-true}"
+      ZIMBRA_COS_ID: "${ZIMBRA_COS_ID:-}"
+
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_STARTTLS: "${SMTP_STARTTLS:-true}"
+      SMTP_SSL: "${SMTP_SSL:-false}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      SMTP_TIMEOUT_SECONDS: "${SMTP_TIMEOUT_SECONDS:-20}"
+      SMTP_RETRY_ATTEMPTS: "${SMTP_RETRY_ATTEMPTS:-3}"
+      SMTP_RETRY_DELAY_SECONDS: "${SMTP_RETRY_DELAY_SECONDS:-2}"
+
+      MAIL_PASSWORD_LENGTH: "16"
+      AD_PASSWORD_MIN_LENGTH: "8"
+      AD_PASSWORD_MAX_LENGTH: "12"
+      ROLLBACK_AD_ON_ZIMBRA_FAILURE: "${ROLLBACK_AD_ON_ZIMBRA_FAILURE:-false}"
+
+    volumes:
+      - account-provisioner-data:/app/data
+    ports:
+      - "${APP_PORT:-8080}:8000"
+
+volumes:
+  account-provisioner-data:
