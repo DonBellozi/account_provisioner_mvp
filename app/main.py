@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.routers import auth, employees
-from app.security import ensure_bootstrap_admin
+from app.security import CSRFMismatchError, ensure_bootstrap_admin
 
 settings = get_settings()
 
@@ -28,13 +29,20 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
-    same_site="lax",
-    https_only=settings.app_base_url.lower().startswith("https://"),
+    session_cookie=settings.session_cookie_name,
+    same_site=settings.session_cookie_samesite,
+    https_only=settings.session_cookie_secure,
     max_age=8 * 60 * 60,
 )
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(auth.router)
 app.include_router(employees.router)
+
+
+@app.exception_handler(CSRFMismatchError)
+async def csrf_mismatch_handler(request: Request, _: CSRFMismatchError):
+    request.session.clear()
+    return RedirectResponse("/login?csrf_error=1", status_code=303)
 
 
 @app.middleware("http")

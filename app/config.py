@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/app.db"
     dry_run: bool = True
 
+    # Для HTTP оставляем false. После перехода на HTTPS меняем на true.
+    session_cookie_secure: bool = False
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    session_cookie_name: str = "account_provisioner_session"
+
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str = "ChangeMeNow!123"
 
@@ -83,7 +88,6 @@ class Settings(BaseSettings):
     @field_validator("ad_default_group_dns", mode="before")
     @classmethod
     def split_group_dns(cls, value: object) -> object:
-        # DN содержит запятые, поэтому несколько групп разделяются точкой с запятой.
         if isinstance(value, str):
             return [item.strip() for item in value.split(";") if item.strip()]
         return value
@@ -93,6 +97,14 @@ class Settings(BaseSettings):
     def validate_secret(cls, value: str) -> str:
         if len(value) < 16:
             raise ValueError("APP_SECRET_KEY должен быть не короче 16 символов")
+        return value
+
+    @field_validator("session_cookie_name")
+    @classmethod
+    def validate_cookie_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("SESSION_COOKIE_NAME не может быть пустым")
         return value
 
     def ensure_runtime_directories(self) -> None:

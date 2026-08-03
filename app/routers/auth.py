@@ -16,12 +16,16 @@ templates = Jinja2Templates(directory="app/templates")
 
 @router.get("/login")
 def login_page(request: Request, settings: Settings = Depends(get_settings)):
+    error = ""
+    if request.query_params.get("csrf_error") == "1":
+        error = "Сессия формы устарела или cookie не была сохранена. Войдите еще раз."
+
     return templates.TemplateResponse(
         request,
         "login.html",
         {
             "csrf": get_or_create_csrf(request),
-            "error": "",
+            "error": error,
             "auth_mode": settings.auth_mode,
         },
     )
@@ -59,6 +63,7 @@ def login(
             status_code=401,
         )
 
+    request.session.pop("csrf", None)
     request.session["user"] = {
         "username": current.username,
         "role": current.role,

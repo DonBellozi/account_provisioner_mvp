@@ -15,6 +15,10 @@ from app.models import LocalUser, UserRole
 password_hash = PasswordHash.recommended()
 
 
+class CSRFMismatchError(Exception):
+    """Сессионный CSRF-токен отсутствует или не совпадает с токеном формы."""
+
+
 @dataclass(frozen=True)
 class CurrentUser:
     username: str
@@ -86,4 +90,4 @@ def get_or_create_csrf(request: Request) -> str:
 def validate_csrf(request: Request, submitted: str) -> None:
     expected = request.session.get("csrf")
     if not expected or not secrets.compare_digest(str(expected), submitted):
-        raise HTTPException(status_code=403, detail="Некорректный CSRF-токен")
+        raise CSRFMismatchError

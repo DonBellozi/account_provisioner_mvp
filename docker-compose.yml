@@ -4,6 +4,7 @@ services:
       context: .
     container_name: account-provisioner
     restart: unless-stopped
+
     environment:
       APP_NAME: "${APP_NAME:-Регистрация учетных записей}"
       APP_SECRET_KEY: "${APP_SECRET_KEY:-change-me-to-a-long-random-secret}"
@@ -11,6 +12,10 @@ services:
       APP_TIMEZONE: "${APP_TIMEZONE:-Europe/Moscow}"
       DATABASE_URL: "sqlite:///./data/app.db"
       DRY_RUN: "${DRY_RUN:-true}"
+
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
+      SESSION_COOKIE_SAMESITE: "${SESSION_COOKIE_SAMESITE:-lax}"
+      SESSION_COOKIE_NAME: "${SESSION_COOKIE_NAME:-account_provisioner_session}"
 
       BOOTSTRAP_ADMIN_USERNAME: "${BOOTSTRAP_ADMIN_USERNAME:-admin}"
       BOOTSTRAP_ADMIN_PASSWORD: "${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMeNow!123}"
@@ -59,15 +64,29 @@ services:
       SMTP_RETRY_ATTEMPTS: "${SMTP_RETRY_ATTEMPTS:-3}"
       SMTP_RETRY_DELAY_SECONDS: "${SMTP_RETRY_DELAY_SECONDS:-2}"
 
-      MAIL_PASSWORD_LENGTH: "16"
-      AD_PASSWORD_MIN_LENGTH: "8"
-      AD_PASSWORD_MAX_LENGTH: "12"
+      MAIL_PASSWORD_LENGTH: "${MAIL_PASSWORD_LENGTH:-16}"
+      MAIL_PASSWORD_SPECIALS: "${MAIL_PASSWORD_SPECIALS:-!@#$%&?}"
+      AD_PASSWORD_MIN_LENGTH: "${AD_PASSWORD_MIN_LENGTH:-8}"
+      AD_PASSWORD_MAX_LENGTH: "${AD_PASSWORD_MAX_LENGTH:-12}"
+      AD_PASSWORD_SPECIALS: "${AD_PASSWORD_SPECIALS:-!@#$%&?}"
       ROLLBACK_AD_ON_ZIMBRA_FAILURE: "${ROLLBACK_AD_ON_ZIMBRA_FAILURE:-false}"
 
     volumes:
       - account-provisioner-data:/app/data
+
     ports:
       - "${APP_PORT:-8081}:8000"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   account-provisioner-data:
