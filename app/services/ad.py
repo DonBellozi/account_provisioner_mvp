@@ -83,7 +83,7 @@ class ActiveDirectoryService:
             return False
 
     def login_exists(self, login: str) -> bool:
-        if self.settings.dry_run:
+        if not self.settings.ad_check_enabled:
             return False
         safe_login = escape_filter_chars(login)
         with self._service_connection() as conn:
@@ -143,7 +143,7 @@ class ActiveDirectoryService:
                 conn.delete(dn)
                 raise RuntimeError(f"AD не принял ни один сгенерированный пароль: {last_password_error}")
             if self.settings.ad_force_change_at_first_logon:
-                if not conn.modify(dn, {"pwdLastSet": [(MODIFY_REPLACE, [0])] }):
+                if not conn.modify(dn, {"pwdLastSet": [(MODIFY_REPLACE, [0])]}):
                     raise RuntimeError(f"AD не установил смену пароля при первом входе: {conn.result}")
             for group_dn in self.settings.ad_default_group_dns:
                 if not conn.modify(group_dn, {"member": [(MODIFY_ADD, [dn])]}):
@@ -154,7 +154,7 @@ class ActiveDirectoryService:
         if self.settings.dry_run:
             return
         with self._service_connection() as conn:
-            if not conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])] }):
+            if not conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]}):
                 raise RuntimeError(f"AD не включил пользователя: {conn.result.get('message') or conn.result}")
 
     def delete_user(self, dn: str) -> None:

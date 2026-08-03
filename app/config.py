@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ad_login_enabled: bool = False
     ad_allowed_group_dn: str = ""
 
+    # Проверки существования могут работать независимо от DRY_RUN.
+    # DRY_RUN блокирует только операции изменения каталога.
+    ad_check_enabled: bool = True
     ad_server: str = ""
     ad_port: int = 636
     ad_use_ssl: bool = True
@@ -44,6 +47,7 @@ class Settings(BaseSettings):
     ad_force_change_at_first_logon: bool = True
     ad_default_group_dns: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    zimbra_check_enabled: bool = False
     zimbra_backend: Literal["ssh_zmprov", "disabled"] = "ssh_zmprov"
     zimbra_ssh_host: str = ""
     zimbra_ssh_port: int = 22

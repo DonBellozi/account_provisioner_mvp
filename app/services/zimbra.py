@@ -83,10 +83,15 @@ class ZimbraService:
             raise
         return client
 
-    def _run_zmprov(self, args: list[str], allow_not_found: bool = False) -> str:
+    def _run_zmprov(
+        self,
+        args: list[str],
+        allow_not_found: bool = False,
+        mutating: bool = True,
+    ) -> str:
         if self.settings.zimbra_backend == "disabled":
             raise RuntimeError("Zimbra backend отключен")
-        if self.settings.dry_run:
+        if mutating and self.settings.dry_run:
             return "DRY-RUN"
 
         command = "sudo -n -u zimbra /opt/zimbra/bin/zmprov"
@@ -107,10 +112,10 @@ class ZimbraService:
             client.close()
 
     def address_exists(self, email: str) -> bool:
-        if self.settings.dry_run:
+        if not self.settings.zimbra_check_enabled:
             return False
         try:
-            self._run_zmprov(["ga", email, "zimbraId"])
+            self._run_zmprov(["ga", email, "zimbraId"], mutating=False)
             return True
         except RuntimeError as exc:
             if "NO_SUCH_ACCOUNT" in str(exc) or "account.NO_SUCH_ACCOUNT" in str(exc):
