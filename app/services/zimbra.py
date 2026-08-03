@@ -83,6 +83,11 @@ class ZimbraService:
             raise
         return client
 
+    def _zmprov_command(self) -> str:
+        if self.settings.zimbra_ssh_user.strip().lower() == "zimbra":
+            return "/opt/zimbra/bin/zmprov"
+        return "sudo -n -u zimbra /opt/zimbra/bin/zmprov"
+
     def _run_zmprov(
         self,
         args: list[str],
@@ -94,7 +99,7 @@ class ZimbraService:
         if mutating and self.settings.dry_run:
             return "DRY-RUN"
 
-        command = "sudo -n -u zimbra /opt/zimbra/bin/zmprov"
+        command = self._zmprov_command()
         client = self._client()
         try:
             stdin, stdout, stderr = client.exec_command(command, timeout=30)
