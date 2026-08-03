@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Результат регистрации{% endblock %}
+{% block content %}
+<h1>Результат регистрации</h1>
+{% if credentials.dry_run %}<div class="alert warning">Это результат DRY_RUN. Реальные учетные записи и письма не создавались.</div>{% endif %}
+{% if credentials.warnings %}
+<div class="alert warning">
+  <strong>Операция завершена со статусом {{ credentials.status }}.</strong>
+  <ul>
+  {% for warning in credentials.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="alert success">Учетные записи созданы, реквизиты отправлены.</div>
+{% endif %}
+
+<section class="card">
+  <h2>Состояние операции</h2>
+  <div class="state-grid">
+    <span>AD создана</span><strong>{{ 'Да' if credentials.ad_created else 'Нет' }}</strong>
+    <span>AD включена</span><strong>{{ 'Да' if credentials.ad_enabled else 'Нет' }}</strong>
+    <span>Zimbra создана</span><strong>{{ 'Да' if credentials.zimbra_created else 'Нет' }}</strong>
+    <span>Письмо на личный адрес</span><strong>{{ 'Отправлено' if credentials.personal_mail_sent else 'Не отправлено' }}</strong>
+    <span>Письмо на корпоративный адрес</span><strong>{{ 'Отправлено' if credentials.corporate_mail_sent else 'Не отправлено' }}</strong>
+  </div>
+</section>
+
+<section class="card credentials" id="credentials">
+  <div class="credential-row"><span>ФИО</span><strong>{{ credentials.full_name }}</strong></div>
+  {% if credentials.zimbra_created %}
+  <div class="credential-row"><span>Email</span><code>{{ credentials.corporate_email }}</code></div>
+  {% if credentials.aliases %}<div class="credential-row"><span>Алиасы</span><code>{{ credentials.aliases|join(', ') }}</code></div>{% endif %}
+  <div class="credential-row"><span>Пароль от почты</span><code>{{ credentials.mail_password }}</code></div>
+  {% endif %}
+  {% if credentials.ad_created %}
+  <div class="credential-row"><span>Логин AD</span><code>{{ credentials.ad_login }}</code></div>
+  <div class="credential-row"><span>Пароль AD</span><code>{{ credentials.ad_password }}</code></div>
+  {% endif %}
+</section>
+<div class="actions">
+  <button onclick="copyCredentials()">Копировать доступные реквизиты</button>
+  <a class="button secondary" href="/employees/new">Создать следующего</a>
+</div>
+<p class="muted">Пароли показаны только на этой странице и не сохраняются в базе. Не оставляйте страницу открытой.</p>
+<script>
+function copyCredentials() {
+  const lines = ["ФИО: " + {{ credentials.full_name|tojson }}];
+  {% if credentials.zimbra_created %}
+  lines.push("Email: " + {{ credentials.corporate_email|tojson }});
+  lines.push("Пароль от почты: " + {{ credentials.mail_password|tojson }});
+  {% endif %}
+  {% if credentials.ad_created %}
+  lines.push("Логин AD: " + {{ credentials.ad_login|tojson }});
+  lines.push("Пароль AD: " + {{ credentials.ad_password|tojson }});
+  {% endif %}
+  navigator.clipboard.writeText(lines.join("\n")).then(() => alert('Реквизиты скопированы'));
+}
+</script>
+{% endblock %}

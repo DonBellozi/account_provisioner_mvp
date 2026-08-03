@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Новый работник{% endblock %}
+{% block content %}
+<h1>Новый работник</h1>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if not parsed %}
+<section class="card">
+  <h2>Вставьте две строки</h2>
+  <form method="post" action="/employees/parse" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>ФИО и личный email
+      <textarea name="raw_input" rows="5" required placeholder="Иванов Иван Иванович&#10;ivanov.personal@example.com"></textarea>
+    </label>
+    <button type="submit">Разобрать данные</button>
+  </form>
+</section>
+{% else %}
+<form method="post" action="/employees/provision" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <section class="card">
+    <h2>Проверьте данные</h2>
+    <div class="grid two">
+      <label>Фамилия<input name="last_name" value="{{ parsed.last_name }}" required></label>
+      <label>Имя<input name="first_name" value="{{ parsed.first_name }}" required></label>
+      <label>Отчество<input name="middle_name" value="{{ parsed.middle_name }}"></label>
+      <label>Личный email<input type="email" name="personal_email" value="{{ parsed.personal_email }}" required></label>
+    </div>
+  </section>
+
+  {% if namesakes %}
+  <section class="card namesakes">
+    <div class="alert warning">
+      <strong>В Active Directory найдены полные тезки.</strong> Совпадение ФИО не означает, что это тот же человек.
+    </div>
+    <table>
+      <thead><tr><th>Логин</th><th>Почта</th><th>Состояние</th></tr></thead>
+      <tbody>
+      {% for person in namesakes %}
+        <tr><td><code>{{ person.login }}</code></td><td>{{ person.email or '–' }}</td><td>{{ 'отключена' if person.disabled else 'активна' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <label class="check-row">
+      <input type="checkbox" name="namesake_acknowledged" value="yes" required>
+      Я проверил совпадения и подтверждаю, что создается другой человек.
+    </label>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Логин</h2>
+    {% if candidates %}
+    <div class="candidate-list">
+      {% for item in candidates %}
+      <label class="candidate {% if not item.free %}occupied{% endif %}">
+        <input type="radio" name="candidate" value="{{ item.login }}" {% if selected_login|default('') == item.login %}checked{% endif %} {% if not item.free %}disabled{% endif %} onclick="document.getElementById('login').value=this.value">
+        <code>{{ item.login }}</code>
+        {% if item.free %}<span>свободен</span>{% else %}<span>занят: {% if item.occupied.ad %}AD {% endif %}{% if item.occupied.zimbra %}Zimbra{% endif %}</span>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label>Выбранный или собственный логин
+      <input id="login" name="login" value="{{ selected_login|default('') }}" pattern="[a-z][a-z0-9.-]{1,19}" maxlength="20" required>
+    </label>
+  </section>
+
+  <section class="card">
+    <h2>Почтовый домен</h2>
+    {% if domain_mode == 'primary_alias' %}
+      <p>Основной домен задается настройками системы. Для остальных доменов будут созданы алиасы.</p>
+    {% endif %}
+    <label>Домен
+      <select name="mail_domain" required>
+        {% for domain in domains %}
+        <option value="{{ domain }}" {% if selected_domain|default('') == domain %}selected{% endif %}>{{ domain }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </section>
+
+  <div class="alert warning">После подтверждения будут созданы учетные записи. Пароли отобразятся только на итоговой странице и не сохранятся в базе.</div>
+  <button type="submit" class="primary large">Создать учетные записи</button>
+</form>
+{% endif %}
+{% endblock %}

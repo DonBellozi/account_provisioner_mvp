@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Вход</h1>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Логин
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Пароль
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Войти</button>
+  </form>
+  <p class="muted">Режим авторизации: {{ auth_mode }}. На первом запуске используется локальный оператор, затем можно включить вход через AD.</p>
+</section>
+{% endblock %}

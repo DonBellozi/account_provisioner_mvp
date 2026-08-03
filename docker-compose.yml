@@ -1,0 +1,14 @@
+services:
+  account-provisioner:
+    build: .
+    container_name: account-provisioner
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./known_hosts:/app/known_hosts:ro
+      - ./secrets/zimbra_ssh_key:/run/secrets/zimbra_ssh_key:ro
+      - ./certs/ad-ca.pem:/run/secrets/ad-ca.pem:ro
+    ports:
+      - "8080:8000"

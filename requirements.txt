@@ -1,0 +1,11 @@
+fastapi>=0.116,<1
+uvicorn[standard]>=0.35,<1
+SQLAlchemy>=2.0,<3
+pydantic-settings>=2.10,<3
+Jinja2>=3.1,<4
+python-multipart>=0.0.20,<1
+pwdlib[argon2]>=0.2,<1
+ldap3>=2.9,<3
+paramiko>=3.5,<5
+email-validator>=2.2,<3
+itsdangerous>=2.2,<3

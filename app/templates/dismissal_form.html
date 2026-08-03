@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Увольнение{% endblock %}
+{% block content %}
+<h1>Запланировать увольнение</h1>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+<section class="card">
+  <form method="post" action="/dismissals" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Логин AD<input name="login" required></label>
+    <label>Корпоративная почта<input type="email" name="corporate_email" required></label>
+    <label>Последний рабочий день<input type="date" name="dismissal_date" required></label>
+    <button type="submit">Установить срок действия и записать дату в Zimbra</button>
+  </form>
+</section>
+<p class="muted">В AD срок действия устанавливается на начало следующего дня. В атрибут zimbraNotes записывается дата в формате ДД.ММ.ГГГГ.</p>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Журнал операций{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Журнал операций</h1>
+    <p class="muted">Пароли в журнале не сохраняются.</p>
+  </div>
+  <a class="button" href="/employees/new">Создать работника</a>
+</div>
+{% if dry_run %}<div class="alert warning">Включен безопасный режим DRY_RUN – реальные изменения в AD, Zimbra и почте не выполняются.</div>{% endif %}
+<section class="card table-wrap">
+  <table>
+    <thead><tr><th>Дата</th><th>ФИО</th><th>Логин</th><th>Почта</th><th>Статус</th><th>Оператор</th></tr></thead>
+    <tbody>
+      {% for item in operations %}
+      <tr>
+        <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ item.last_name }} {{ item.first_name }} {{ item.middle_name }}</td>
+        <td><code>{{ item.login }}</code></td>
+        <td>{{ item.corporate_email }}</td>
+        <td><span class="status {{ item.status.value }}">{{ item.status.value }}</span></td>
+        <td>{{ item.operator_username }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Операций пока нет.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
