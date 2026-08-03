@@ -14,6 +14,9 @@ TRANSLIT = {
     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
 }
 
+MAX_LOGIN_LENGTH = 20
+RUSSIAN_NAME_RE = re.compile(r"^[А-Яа-яЁё]+(?:[ -][А-Яа-яЁё]+)*$")
+
 
 @dataclass(frozen=True)
 class ParsedPerson:
@@ -37,6 +40,35 @@ def transliterate(value: str) -> str:
     return "".join(out)
 
 
+def validate_russian_name(value: str, field_name: str, *, required: bool = True) -> str:
+    """Validate that a name contains only Russian letters, spaces and hyphens.
+
+    This intentionally rejects Latin look-alike characters such as a/c/e/o/p/x,
+    because they are a common source of incorrect AD attributes and logins.
+    """
+    normalized = normalize_spaces(value)
+    if not normalized:
+        if required:
+            raise ValueError(f"Поле «{field_name}» не заполнено")
+        return ""
+    if not RUSSIAN_NAME_RE.fullmatch(normalized):
+        suspicious = sorted({char for char in normalized if not re.fullmatch(r"[А-Яа-яЁё -]", char)})
+        details = ", ".join(repr(char) for char in suspicious) or "неподдерживаемые символы"
+        raise ValueError(
+            f"В поле «{field_name}» обнаружены символы не из русской раскладки: {details}. "
+            "Разрешены русские буквы, пробел и дефис."
+        )
+    return normalized
+
+
+def validate_person_name(last_name: str, first_name: str, middle_name: str = "") -> tuple[str, str, str]:
+    return (
+        validate_russian_name(last_name, "Фамилия"),
+        validate_russian_name(first_name, "Имя"),
+        validate_russian_name(middle_name, "Отчество", required=False),
+    )
+
+
 def parse_two_line_input(raw: str) -> ParsedPerson:
     lines = [normalize_spaces(line) for line in raw.splitlines() if normalize_spaces(line)]
     if len(lines) < 2:
@@ -56,29 +88,82 @@ def parse_two_line_input(raw: str) -> ParsedPerson:
     if len(parts) < 2:
         raise ValueError("ФИО должно содержать как минимум фамилию и имя")
 
+    last_name, first_name, middle_name = validate_person_name(
+        parts[0],
+        parts[1],
+        " ".join(parts[2:]),
+    )
     return ParsedPerson(
-        last_name=parts[0],
-        first_name=parts[1],
-        middle_name=" ".join(parts[2:]),
+        last_name=last_name,
+        first_name=first_name,
+        middle_name=middle_name,
         personal_email=email,
     )
 
 
+def _candidate(last: str, suffix: str | None = None) -> str:
+    last = re.sub(r"[^a-z0-9-]", "", last.lower())
+    if not suffix:
+        return last[:MAX_LOGIN_LENGTH].strip(".-")
+
+    suffix = re.sub(r"[^a-z0-9-]", "", suffix.lower())
+    available_for_last = MAX_LOGIN_LENGTH - len(suffix) - 1
+    if available_for_last < 1:
+        return ""
+    return f"{last[:available_for_last]}.{suffix}".strip(".-")
+
+
 def build_login_candidates(last_name: str, first_name: str, middle_name: str = "") -> list[str]:
+    """Build login candidates in the organization's required order.
+
+    Order:
+    1. surname + first-name initial + patronymic initial, e.g. ivanov.ii;
+    2. surname + first-name initial, e.g. ivanov.i;
+    3. surname only, e.g. ivanov;
+    4. letter-expansion variants without numeric suffixes.
+
+    Expansion uses the transliterated spelling. Therefore the patronymic
+    «Юрьевич» first contributes ``y`` and then expands to ``yu``, ``yur`` etc.
+    """
     last = transliterate(last_name)
     first = transliterate(first_name)
     middle = transliterate(middle_name)
-    initials = (first[:1] + middle[:1]).lower()
-
-    candidates = [f"{last}.{initials}" if initials else f"{last}.{first[:1]}"]
-    candidates.append(f"{last}.{first}")
-    if middle:
-        candidates.append(f"{last}.{first}.{middle[:1]}")
-    candidates.append(f"{first[:1]}.{last}")
+    if not last or not first:
+        raise ValueError("Не удалось сформировать логин из ФИО")
 
     result: list[str] = []
-    for candidate in candidates:
-        cleaned = re.sub(r"[^a-z0-9.-]", "", candidate.lower()).strip(".-")
-        if cleaned and cleaned not in result:
-            result.append(cleaned[:20])  # sAMAccountName compatibility
+
+    def add(value: str) -> None:
+        cleaned = re.sub(r"[^a-z0-9.-]", "", value.lower()).strip(".-")
+        if cleaned and len(cleaned) <= MAX_LOGIN_LENGTH and cleaned not in result:
+            result.append(cleaned)
+
+    first_initial = first[:1]
+    middle_initial = middle[:1]
+
+    # Основные варианты строго в согласованном порядке.
+    add(_candidate(last, first_initial + middle_initial if middle_initial else first_initial))
+    add(_candidate(last, first_initial))
+    add(_candidate(last))
+
+    # Сначала расширяем отчество: y -> yu -> yur ...
+    if middle:
+        for length in range(2, min(len(middle), 8) + 1):
+            add(_candidate(last, first_initial + middle[:length]))
+
+    # Затем расширяем имя, сохраняя первую букву отчества.
+    if middle_initial:
+        for length in range(2, min(len(first), 8) + 1):
+            add(_candidate(last, first[:length] + middle_initial))
+
+    # Варианты только с расширенным именем.
+    for length in range(2, min(len(first), 8) + 1):
+        add(_candidate(last, first[:length]))
+
+    # Дополнительные комбинированные варианты для редких серий совпадений.
+    if middle:
+        for first_length in range(2, min(len(first), 5) + 1):
+            for middle_length in range(2, min(len(middle), 5) + 1):
+                add(_candidate(last, first[:first_length] + middle[:middle_length]))
+
     return result

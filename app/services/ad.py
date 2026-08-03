@@ -96,45 +96,6 @@ class ActiveDirectoryService:
             return bool(conn.entries)
 
 
-    @staticmethod
-    def _normalize_person_name(value: str) -> str:
-        return " ".join(value.casefold().replace("ё", "е").split())
-
-    def find_namesakes(self, last_name: str, first_name: str, middle_name: str = "") -> list[dict[str, str | bool]]:
-        if self.settings.dry_run:
-            return []
-        display_name = " ".join(part for part in [last_name, first_name, middle_name] if part)
-        target = self._normalize_person_name(display_name)
-        last_prefix = escape_filter_chars(last_name[:2])
-        first_prefix = escape_filter_chars(first_name[:2])
-        with self._service_connection() as conn:
-            conn.search(
-                self.settings.ad_base_dn,
-                f"(&(objectClass=user)(sn={last_prefix}*)(givenName={first_prefix}*))",
-                attributes=["displayName", "sAMAccountName", "mail", "userAccountControl", "distinguishedName"],
-                size_limit=200,
-            )
-            result: list[dict[str, str | bool]] = []
-            for entry in conn.entries:
-                existing_display_name = str(entry.displayName) if entry.displayName else ""
-                normalized_existing = self._normalize_person_name(existing_display_name)
-                if middle_name:
-                    if normalized_existing != target:
-                        continue
-                else:
-                    # Без отчества предупреждаем обо всех совпадениях фамилии и имени.
-                    normalized_parts = normalized_existing.split()
-                    if len(normalized_parts) < 2 or normalized_parts[:2] != target.split()[:2]:
-                        continue
-                uac = int(str(entry.userAccountControl)) if entry.userAccountControl else 0
-                result.append({
-                    "login": str(entry.sAMAccountName) if entry.sAMAccountName else "",
-                    "email": str(entry.mail) if entry.mail else "",
-                    "disabled": bool(uac & 2),
-                    "dn": str(entry.entry_dn),
-                })
-            return result
-
     def create_disabled_user(
         self,
         login: str,
