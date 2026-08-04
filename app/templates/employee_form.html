@@ -97,8 +97,8 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
     <div class="candidate-pool">
       <div class="candidate-pool-heading">
         <div>
-          <h3>Доступные стандартные варианты</h3>
-          <p class="muted">Проверяется до 12 вариантов. На экране показывается не больше 6 свободных.</p>
+          <h3>Доступные альтернативные варианты</h3>
+          <p class="muted">Проверяется до 12 вариантов. Текущий логин здесь не дублируется, показывается не больше 6 свободных альтернатив.</p>
         </div>
         <div class="candidate-pool-summary" id="candidate-pool-summary">
           <span class="spinner" aria-hidden="true"></span>
@@ -144,6 +144,7 @@ let lastCheckedLogin = '';
 let loginCheckReady = false;
 let operatorChangedLogin = false;
 const candidateResultMap = new Map();
+let latestCandidateItems = [];
 let sourceResults = {
   ad: null,
   zimbra: null,
@@ -160,6 +161,7 @@ function selectLogin(login, automatic = false) {
   loginInput.value = login;
   updateSuggestionSelection();
   updatePreview();
+  refreshCandidatePoolVisible();
 
   if (!applyCandidateResult(login)) {
     runLoginCheck();
@@ -416,8 +418,13 @@ function renderCandidatePoolChecking() {
     return;
   }
 
+  const currentLogin = valueOf('login').toLowerCase();
+  const visibleLogins = candidateLogins
+    .filter(login => login !== currentLogin)
+    .slice(0, 6);
+
   list.replaceChildren();
-  candidateLogins.slice(0, 6).forEach(login => {
+  visibleLogins.forEach(login => {
     const row = document.createElement('div');
     row.className = 'candidate-option checking';
 
@@ -437,21 +444,22 @@ function renderCandidatePoolChecking() {
   summary.replaceChildren(makeSpinner(), document.createTextNode('Проверяются варианты'));
 }
 
-function renderCandidatePool(items) {
+function refreshCandidatePoolVisible() {
   const list = document.getElementById('candidate-pool-list');
   const summary = document.getElementById('candidate-pool-summary');
-  if (!list || !summary) {
+  if (!list || !summary || !latestCandidateItems.length) {
     return;
   }
 
-  candidateResultMap.clear();
-  items.forEach(item => candidateResultMap.set(item.login, item));
+  const currentLogin = valueOf('login').toLowerCase();
+  const freeAlternatives = latestCandidateItems.filter(
+    item => item.free && item.login !== currentLogin,
+  );
+  const occupiedCount = latestCandidateItems.filter(item => !item.free).length;
 
-  const freeItems = items.filter(item => item.free);
-  const occupiedCount = items.length - freeItems.length;
   list.replaceChildren();
 
-  freeItems.slice(0, 6).forEach(item => {
+  freeAlternatives.slice(0, 6).forEach(item => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'candidate-option free';
@@ -469,10 +477,16 @@ function renderCandidatePool(items) {
     list.appendChild(button);
   });
 
-  if (freeItems.length === 0) {
+  if (freeAlternatives.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'candidate-pool-empty';
-    empty.textContent = 'Свободных стандартных вариантов не найдено. Введите собственный логин.';
+
+    const currentResult = candidateResultMap.get(currentLogin);
+    if (currentResult?.free) {
+      empty.textContent = 'Других свободных стандартных вариантов не найдено.';
+    } else {
+      empty.textContent = 'Свободных стандартных вариантов не найдено. Введите собственный логин.';
+    }
     list.appendChild(empty);
   }
 
@@ -481,7 +495,7 @@ function renderCandidatePool(items) {
 
   const freeBadge = document.createElement('span');
   freeBadge.className = 'candidate-count free';
-  freeBadge.textContent = `Свободно: ${freeItems.length}`;
+  freeBadge.textContent = `Альтернатив: ${freeAlternatives.length}`;
 
   const occupiedBadge = document.createElement('span');
   occupiedBadge.className = 'candidate-count occupied';
@@ -489,7 +503,14 @@ function renderCandidatePool(items) {
 
   summary.append(freeBadge, document.createTextNode(' '), occupiedBadge);
   updateSuggestionSelection();
+}
 
+function renderCandidatePool(items) {
+  candidateResultMap.clear();
+  items.forEach(item => candidateResultMap.set(item.login, item));
+  latestCandidateItems = items;
+
+  const freeItems = items.filter(item => item.free);
   const currentLogin = valueOf('login').toLowerCase();
   const currentResult = candidateResultMap.get(currentLogin);
 
@@ -497,6 +518,8 @@ function renderCandidatePool(items) {
     selectLogin(freeItems[0].login, true);
     return;
   }
+
+  refreshCandidatePoolVisible();
 
   if (currentResult) {
     applyCandidateResult(currentLogin);
