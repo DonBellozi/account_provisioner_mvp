@@ -225,7 +225,13 @@ class CredentialMailer:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def _send_once(self, message: EmailMessage) -> None:
+    def _send_once(
+        self,
+        message: EmailMessage,
+        *,
+        envelope_sender: str,
+        recipient: str,
+    ) -> None:
         if self.settings.smtp_ssl:
             client: smtplib.SMTP = smtplib.SMTP_SSL(
                 self.settings.smtp_host,
@@ -246,7 +252,15 @@ class CredentialMailer:
                 client.ehlo()
             if self.settings.smtp_username:
                 client.login(self.settings.smtp_username, self.settings.smtp_password)
-            client.send_message(message)
+
+            # SMTP MAIL FROM должен принадлежать пользователю, под которым
+            # выполнена SASL-аутентификация. Заголовок From при этом остается
+            # адресом отправителя из профиля почтового домена.
+            client.send_message(
+                message,
+                from_addr=envelope_sender,
+                to_addrs=[recipient],
+            )
         finally:
             try:
                 client.quit()
@@ -280,11 +294,24 @@ class CredentialMailer:
         message.set_content(html_to_text(body_html))
         message.add_alternative(body_html, subtype="html")
 
+        # Для Zimbra с reject_authenticated_sender_login_mismatch адрес
+        # конверта должен совпадать с SMTP-пользователем. Получатель продолжит
+        # видеть обычный From из профиля, например ИТ-служба <it@domain.com>.
+        envelope_sender = (
+            self.settings.smtp_username.strip().lower()
+            if self.settings.smtp_username.strip()
+            else sender_email
+        )
+
         last_error: Exception | None = None
         attempts = max(1, self.settings.smtp_retry_attempts)
         for attempt in range(1, attempts + 1):
             try:
-                self._send_once(message)
+                self._send_once(
+                    message,
+                    envelope_sender=envelope_sender,
+                    recipient=recipient,
+                )
                 return
             except (OSError, smtplib.SMTPException) as exc:
                 last_error = exc
