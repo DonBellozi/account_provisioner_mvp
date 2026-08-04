@@ -44,7 +44,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
     <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а подходящие стандартные варианты подбираются в фоне.</p>
 
     <div class="login-domain-stack">
-      <div class="login-domain-row">
+      <div class="grid two login-domain-fields">
         <label>Предлагаемый или собственный логин
           <input id="login"
                  name="login"
@@ -62,7 +62,9 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
             {% endfor %}
           </select>
         </label>
+      </div>
 
+      <div class="login-domain-actions">
         <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
       </div>
 
@@ -444,7 +446,7 @@ function renderCandidatePool(items) {
   occupiedBadge.className = 'candidate-count occupied';
   occupiedBadge.textContent = `Занято: ${occupiedCount}`;
 
-  summary.append(freeBadge, occupiedBadge);
+  summary.append(freeBadge, document.createTextNode(' '), occupiedBadge);
   updateSuggestionSelection();
 
   const currentLogin = valueOf('login').toLowerCase();

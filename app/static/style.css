@@ -73,11 +73,12 @@ code { font-family: Consolas, monospace; word-break: break-all; }
   display: grid;
   gap: 14px;
 }
-.login-domain-row {
-  display: grid;
-  grid-template-columns: minmax(260px, 2fr) minmax(210px, 1fr) auto;
+.login-domain-fields {
   align-items: end;
-  gap: 12px;
+}
+.login-domain-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .check-again {
   white-space: nowrap;
@@ -269,7 +270,6 @@ button.candidate-option:hover {
   nav { flex-wrap: wrap; }
   .grid.two { grid-template-columns: 1fr; }
   .credential-row { grid-template-columns: 1fr; gap: 5px; }
-  .login-domain-row { grid-template-columns: 1fr; }
   .check-again { width: 100%; }
   .candidate-pool-heading { flex-direction: column; }
   .candidate-pool-summary { justify-content: flex-start; }
