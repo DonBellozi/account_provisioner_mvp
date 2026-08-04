@@ -38,22 +38,71 @@
   {% endif %}
 </section>
 <div class="actions">
-  <button onclick="copyCredentials()">Копировать доступные реквизиты</button>
+  <button type="button" onclick="copyCredentials(this)">Копировать доступные реквизиты</button>
   <a class="button secondary" href="/employees/new">Создать следующего</a>
 </div>
 <p class="muted">Пароли показаны только на этой странице и не сохраняются в базе. Не оставляйте страницу открытой.</p>
 <script>
-function copyCredentials() {
-  const lines = ["ФИО: " + {{ credentials.full_name|tojson }}];
-  {% if credentials.zimbra_created %}
-  lines.push("Email: " + {{ credentials.corporate_email|tojson }});
-  lines.push("Пароль от почты: " + {{ credentials.mail_password|tojson }});
-  {% endif %}
-  {% if credentials.ad_created %}
-  lines.push("Логин AD: " + {{ credentials.ad_login|tojson }});
-  lines.push("Пароль AD: " + {{ credentials.ad_password|tojson }});
-  {% endif %}
-  navigator.clipboard.writeText(lines.join("\n")).then(() => alert('Реквизиты скопированы'));
+async function writePlainTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  // Резервный способ для внутреннего сайта, открытого по обычному HTTP.
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    textarea.remove();
+  }
+
+  if (!copied) {
+    throw new Error('Браузер не разрешил запись в буфер обмена');
+  }
+}
+
+async function copyCredentials(button) {
+  // В буфер попадают только значения, по одному в строке:
+  // ФИО, корпоративный адрес, пароль почты, пароль AD.
+  // Логин AD отдельно не дублируется, так как совпадает с частью email до @.
+  const lines = [
+    {{ credentials.full_name|tojson }},
+    {% if credentials.zimbra_created %}
+    {{ credentials.corporate_email|tojson }},
+    {{ credentials.mail_password|tojson }},
+    {% endif %}
+    {% if credentials.ad_created %}
+    {{ credentials.ad_password|tojson }},
+    {% endif %}
+  ].filter(value => typeof value === 'string' && value.length > 0);
+
+  const originalText = button.textContent;
+  try {
+    await writePlainTextToClipboard(lines.join('\n'));
+    button.textContent = 'Реквизиты скопированы';
+  } catch (error) {
+    button.textContent = 'Не удалось скопировать';
+    alert(
+      'Браузер не разрешил автоматическое копирование. ' +
+      'Откройте страницу по HTTPS или разрешите доступ к буферу обмена.'
+    );
+  } finally {
+    window.setTimeout(() => {
+      button.textContent = originalText;
+    }, 1800);
+  }
 }
 </script>
 {% endblock %}
