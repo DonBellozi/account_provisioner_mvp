@@ -686,6 +686,13 @@ provisionForm.addEventListener('submit', event => {
     return;
   }
 
+  // Альтернативы больше не нужны: выбранный логин уже проверен и свободен.
+  // Прерываем браузерный запрос, чтобы отправка формы началась немедленно.
+  if (candidatePoolController) {
+    candidatePoolController.abort();
+    candidatePoolController = null;
+  }
+
   provisionButton.disabled = true;
   provisionButton.textContent = 'Создание учетных записей...';
 });

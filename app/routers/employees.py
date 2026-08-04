@@ -18,7 +18,7 @@ from app.security import get_current_user, get_or_create_csrf, validate_csrf
 from app.services.ad import ActiveDirectoryService
 from app.services.names import build_login_candidates, parse_two_line_input, validate_person_name
 from app.services.provisioning import ProvisioningInput, ProvisioningService
-from app.services.zimbra import ZimbraService
+from app.services.zimbra import BackgroundLoginCheckCancelled, ZimbraService
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -233,6 +233,7 @@ def check_login_candidates(
         items = ProvisioningService(settings).check_logins(
             logins,
             force_refresh=force_refresh,
+            background=True,
         )
         return {
             "ok": True,
@@ -240,6 +241,15 @@ def check_login_candidates(
             "checked": len(items),
             "elapsed_ms": round((time.perf_counter() - started) * 1000),
         }
+    except BackgroundLoginCheckCancelled:
+        return JSONResponse(
+            {
+                "ok": False,
+                "cancelled": True,
+                "error": "Фоновая проверка альтернатив отменена",
+            },
+            status_code=409,
+        )
     except Exception as exc:
         return JSONResponse(
             {

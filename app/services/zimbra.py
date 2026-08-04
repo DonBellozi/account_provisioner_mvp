@@ -18,6 +18,10 @@ class ZimbraCreateResult:
     aliases: tuple[str, ...]
 
 
+class BackgroundLoginCheckCancelled(RuntimeError):
+    """Фоновая проверка альтернатив остановлена перед созданием учетных записей."""
+
+
 class ZimbraService:
     # Результаты коротко кэшируются, чтобы фоновая проверка списка,
     # проверка выбранного логина и повторная проверка не запускали несколько
@@ -25,6 +29,8 @@ class ZimbraService:
     _CACHE_TTL_SECONDS = 45.0
     _cache_lock = threading.Lock()
     _query_lock = threading.Lock()
+    _background_state_lock = threading.Lock()
+    _background_cancel_event: threading.Event | None = None
     _login_cache: dict[
         tuple[str, int, tuple[str, ...], str],
         tuple[float, bool],
@@ -32,6 +38,34 @@ class ZimbraService:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+
+    @classmethod
+    def begin_background_check(cls) -> threading.Event:
+        """Начать новую фоновую проверку, отменив предыдущую."""
+        with cls._background_state_lock:
+            if cls._background_cancel_event is not None:
+                cls._background_cancel_event.set()
+            event = threading.Event()
+            cls._background_cancel_event = event
+            return event
+
+    @classmethod
+    def cancel_background_checks(cls) -> None:
+        """Остановить текущую проверку альтернатив перед созданием учетных записей."""
+        with cls._background_state_lock:
+            if cls._background_cancel_event is not None:
+                cls._background_cancel_event.set()
+
+    @classmethod
+    def finish_background_check(cls, event: threading.Event) -> None:
+        with cls._background_state_lock:
+            if cls._background_cancel_event is event:
+                cls._background_cancel_event = None
+
+    @staticmethod
+    def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise BackgroundLoginCheckCancelled("Фоновая проверка альтернатив отменена")
 
     def _read_ssh_password(self) -> str:
         if self.settings.zimbra_ssh_password_file:
@@ -140,12 +174,28 @@ class ZimbraService:
         self,
         client: paramiko.SSHClient,
         args: list[str],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> str:
+        self._raise_if_cancelled(cancel_event)
         command = f"{self._zmprov_command()} -l {shlex.join(args)}"
         stdin, stdout, stderr = client.exec_command(command, timeout=45)
         stdin.channel.shutdown_write()
 
-        code = stdout.channel.recv_exit_status()
+        channel = stdout.channel
+        deadline = time.monotonic() + 45.0
+        while not channel.exit_status_ready():
+            if cancel_event is not None and cancel_event.is_set():
+                channel.close()
+                raise BackgroundLoginCheckCancelled(
+                    "Фоновая проверка альтернатив отменена"
+                )
+            if time.monotonic() >= deadline:
+                channel.close()
+                raise RuntimeError("Превышено время ожидания ответа zmprov")
+            time.sleep(0.05)
+
+        code = channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace").strip()
         err = stderr.read().decode("utf-8", errors="replace").strip()
         combined = f"{err}\n{out}"
@@ -224,6 +274,8 @@ class ZimbraService:
         self,
         client: paramiko.SSHClient,
         logins: list[str],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> set[str]:
         """Найти все занятые логины одним запуском zmprov.
 
@@ -256,6 +308,7 @@ class ZimbraService:
         output = self._execute_zmprov_lookup(
             client,
             ["sa", "-v", ldap_query, str(limit)],
+            cancel_event=cancel_event,
         )
 
         existing: set[str] = set()
@@ -291,14 +344,22 @@ class ZimbraService:
         self,
         client: paramiko.SSHClient,
         logins: list[str],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> set[str]:
         """Совместимый запасной способ для старых сборок Zimbra."""
         existing: set[str] = set()
         for login in logins:
+            self._raise_if_cancelled(cancel_event)
             for domain in self.settings.zimbra_domains:
+                self._raise_if_cancelled(cancel_event)
                 email = f"{login}@{domain}"
                 try:
-                    self._execute_zmprov_lookup(client, ["ga", email, "zimbraId"])
+                    self._execute_zmprov_lookup(
+                        client,
+                        ["ga", email, "zimbraId"],
+                        cancel_event=cancel_event,
+                    )
                     existing.add(login)
                     break
                 except RuntimeError as exc:
@@ -327,6 +388,7 @@ class ZimbraService:
         logins: list[str],
         *,
         force_refresh: bool = False,
+        background: bool = False,
     ) -> set[str]:
         if not self.settings.zimbra_check_enabled:
             return set()
@@ -362,9 +424,11 @@ class ZimbraService:
         if not missing:
             return existing
 
-        # Одновременно пришедшие запросы (список кандидатов и выбранный
-        # логин) не должны параллельно запускать одинаковые zmprov-команды.
-        with self._query_lock:
+        cancel_event = self.begin_background_check() if background else None
+
+        def execute_query() -> set[str]:
+            self._raise_if_cancelled(cancel_event)
+
             still_missing: list[str] = []
             if force_refresh:
                 still_missing = list(missing)
@@ -382,22 +446,50 @@ class ZimbraService:
             client = self._client()
             try:
                 try:
-                    found = self._search_existing_logins(client, still_missing)
+                    found = self._search_existing_logins(
+                        client,
+                        still_missing,
+                        cancel_event=cancel_event,
+                    )
+                except BackgroundLoginCheckCancelled:
+                    raise
                 except RuntimeError:
                     # Старые или измененные сборки Zimbra могут не принимать
                     # searchAccounts в ожидаемом виде. В этом случае сохраняем
                     # прежний надежный способ проверки.
-                    found = self._fallback_existing_logins(client, still_missing)
+                    found = self._fallback_existing_logins(
+                        client,
+                        still_missing,
+                        cancel_event=cancel_event,
+                    )
             finally:
                 client.close()
 
+            self._raise_if_cancelled(cancel_event)
             for login in still_missing:
                 is_existing = login in found
                 self._cache_set(login, is_existing)
                 if is_existing:
                     existing.add(login)
 
-        return existing
+            return existing
+
+        try:
+            if force_refresh and not background:
+                # Финальная проверка выбранного логина имеет приоритет и не
+                # ожидает завершения полного списка альтернатив.
+                return execute_query()
+
+            # Обычные параллельные запросы по-прежнему объединяем одним lock.
+            while not self._query_lock.acquire(timeout=0.1):
+                self._raise_if_cancelled(cancel_event)
+            try:
+                return execute_query()
+            finally:
+                self._query_lock.release()
+        finally:
+            if cancel_event is not None:
+                self.finish_background_check(cancel_event)
 
     def login_exists_any_domain(
         self,
@@ -409,6 +501,7 @@ class ZimbraService:
         return normalized in self.logins_exist_any_domain(
             [normalized],
             force_refresh=force_refresh,
+            background=False,
         )
 
     def create_account(

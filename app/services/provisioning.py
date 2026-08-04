@@ -73,6 +73,7 @@ class ProvisioningService:
         logins: list[str],
         *,
         force_refresh: bool = False,
+        background: bool = False,
     ) -> list[dict[str, object]]:
         normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
         if not normalized:
@@ -85,6 +86,7 @@ class ProvisioningService:
         zimbra_existing = self.zimbra.logins_exist_any_domain(
             normalized,
             force_refresh=force_refresh,
+            background=background,
         )
 
         return [
@@ -98,6 +100,11 @@ class ProvisioningService:
         ]
 
     def provision(self, db: Session, operator: str, data: ProvisioningInput) -> ProvisioningCredentials:
+        # Выбранный логин уже проверен оператором. Полный поиск альтернатив
+        # больше не нужен: останавливаем его и сразу выполняем финальную
+        # проверку только выбранного логина.
+        self.zimbra.cancel_background_checks()
+
         # Непосредственно перед созданием не доверяем кратковременному
         # кэшу Zimbra: итоговая проверка всегда выполняется заново.
         availability = self.check_login(data.login, force_refresh=True)
