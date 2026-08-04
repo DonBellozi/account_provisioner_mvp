@@ -73,9 +73,9 @@ code { font-family: Consolas, monospace; word-break: break-all; }
   display: grid;
   gap: 14px;
 }
-.login-input-row {
+.login-domain-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(260px, 2fr) minmax(210px, 1fr) auto;
   align-items: end;
   gap: 12px;
 }
@@ -269,7 +269,7 @@ button.candidate-option:hover {
   nav { flex-wrap: wrap; }
   .grid.two { grid-template-columns: 1fr; }
   .credential-row { grid-template-columns: 1fr; gap: 5px; }
-  .login-input-row { grid-template-columns: 1fr; }
+  .login-domain-row { grid-template-columns: 1fr; }
   .check-again { width: 100%; }
   .candidate-pool-heading { flex-direction: column; }
   .candidate-pool-summary { justify-content: flex-start; }

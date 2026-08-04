@@ -44,7 +44,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
     <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а подходящие стандартные варианты подбираются в фоне.</p>
 
     <div class="login-domain-stack">
-      <div class="login-input-row">
+      <div class="login-domain-row">
         <label>Предлагаемый или собственный логин
           <input id="login"
                  name="login"
@@ -54,16 +54,18 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
                  required
                  autocomplete="off">
         </label>
+
+        <label>Почтовый домен
+          <select id="mail_domain" name="mail_domain" required onchange="updatePreview()">
+            {% for domain in domains %}
+            <option value="{{ domain }}" {% if selected_domain|default('') == domain %}selected{% endif %}>{{ domain }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
         <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
       </div>
 
-      <label>Почтовый домен
-        <select id="mail_domain" name="mail_domain" required onchange="updatePreview()">
-          {% for domain in domains %}
-          <option value="{{ domain }}" {% if selected_domain|default('') == domain %}selected{% endif %}>{{ domain }}</option>
-          {% endfor %}
-        </select>
-      </label>
       {% if domain_mode == 'primary_alias' %}
         <p class="muted">Основной домен задается настройками системы. Для остальных доменов будут созданы алиасы.</p>
       {% endif %}
