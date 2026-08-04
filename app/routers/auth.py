@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.security import authenticate_local, get_or_create_csrf, validate_csrf
+from app.security import (
+    CurrentUser,
+    authenticate_local,
+    get_domain_access,
+    get_or_create_csrf,
+    normalize_username,
+    validate_csrf,
+)
 from app.services.ad import ActiveDirectoryService
 
 router = APIRouter()
@@ -41,15 +48,27 @@ def login(
     settings: Settings = Depends(get_settings),
 ):
     validate_csrf(request, csrf)
-    username = username.strip()
-    current = None
+    normalized_username = normalize_username(username)
+    current: CurrentUser | None = None
 
     if settings.auth_mode in {"local", "hybrid"}:
-        current = authenticate_local(db, username, password)
+        current = authenticate_local(db, normalized_username, password)
 
-    if current is None and settings.auth_mode in {"ad", "hybrid"} and settings.ad_login_enabled:
-        if ActiveDirectoryService(settings).authenticate_operator(username, password):
-            current = type("AuthResult", (), {"username": username, "role": "operator", "source": "ad"})()
+    if (
+        current is None
+        and settings.auth_mode in {"ad", "hybrid"}
+        and settings.ad_login_enabled
+    ):
+        access = get_domain_access(db, normalized_username)
+        if access is not None and ActiveDirectoryService(settings).authenticate_operator(
+            normalized_username,
+            password,
+        ):
+            current = CurrentUser(
+                username=access.username,
+                role=access.role.value,
+                source="ad",
+            )
 
     if current is None:
         return templates.TemplateResponse(
@@ -57,7 +76,7 @@ def login(
             "login.html",
             {
                 "csrf": get_or_create_csrf(request),
-                "error": "Неверный логин или пароль",
+                "error": "Неверный логин, пароль или доступ к системе не назначен",
                 "auth_mode": settings.auth_mode,
             },
             status_code=401,

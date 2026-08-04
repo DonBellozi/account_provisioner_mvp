@@ -20,6 +20,15 @@ class ADCreateResult:
     accepted_password: str
 
 
+@dataclass(frozen=True)
+class ADDirectoryUser:
+    username: str
+    display_name: str
+    email: str
+    distinguished_name: str
+    is_enabled: bool
+
+
 class ActiveDirectoryService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -81,6 +90,97 @@ class ActiveDirectoryService:
                 conn.unbind()
         except LDAPException:
             return False
+
+    @staticmethod
+    def _entry_value(entry, attribute: str, default=""):
+        value = getattr(entry, attribute, None)
+        if value is None:
+            return default
+        return value.value if hasattr(value, "value") else default
+
+    @classmethod
+    def _entry_to_directory_user(cls, entry) -> ADDirectoryUser | None:
+        username = str(cls._entry_value(entry, "sAMAccountName", "") or "").strip().lower()
+        if not username:
+            return None
+
+        display_name = str(cls._entry_value(entry, "displayName", "") or "").strip()
+        email = str(cls._entry_value(entry, "mail", "") or "").strip()
+        user_account_control = int(cls._entry_value(entry, "userAccountControl", 0) or 0)
+
+        return ADDirectoryUser(
+            username=username,
+            display_name=display_name,
+            email=email,
+            distinguished_name=str(entry.entry_dn),
+            is_enabled=(user_account_control & 2) == 0,
+        )
+
+    def search_users(self, query: str, limit: int = 20) -> list[ADDirectoryUser]:
+        normalized_query = query.strip()
+        if len(normalized_query) < 2:
+            raise ValueError("Для поиска в AD введите не менее двух символов")
+
+        safe = escape_filter_chars(normalized_query)
+        search_filter = (
+            "(&(objectCategory=person)(objectClass=user)"
+            f"(|(sAMAccountName=*{safe}*)"
+            f"(displayName=*{safe}*)"
+            f"(sn=*{safe}*)"
+            f"(givenName=*{safe}*)"
+            f"(mail=*{safe}*)))"
+        )
+
+        with self._service_connection() as conn:
+            conn.search(
+                self.settings.ad_base_dn,
+                search_filter,
+                attributes=[
+                    "sAMAccountName",
+                    "displayName",
+                    "mail",
+                    "userAccountControl",
+                    "distinguishedName",
+                ],
+                size_limit=max(1, min(limit, 50)),
+            )
+            users = [
+                user
+                for entry in conn.entries
+                if (user := self._entry_to_directory_user(entry)) is not None
+            ]
+
+        return sorted(
+            users,
+            key=lambda item: (
+                not item.is_enabled,
+                item.display_name.lower(),
+                item.username,
+            ),
+        )[:limit]
+
+    def get_user(self, username: str) -> ADDirectoryUser | None:
+        normalized = username.strip().lower()
+        if not normalized:
+            return None
+
+        safe = escape_filter_chars(normalized)
+        with self._service_connection() as conn:
+            conn.search(
+                self.settings.ad_base_dn,
+                f"(&(objectCategory=person)(objectClass=user)(sAMAccountName={safe}))",
+                attributes=[
+                    "sAMAccountName",
+                    "displayName",
+                    "mail",
+                    "userAccountControl",
+                    "distinguishedName",
+                ],
+                size_limit=1,
+            )
+            if not conn.entries:
+                return None
+            return self._entry_to_directory_user(conn.entries[0])
 
     def logins_exist(self, logins: list[str]) -> set[str]:
         if not self.settings.ad_check_enabled:

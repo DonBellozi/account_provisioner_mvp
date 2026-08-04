@@ -282,3 +282,98 @@ button.candidate-option:hover {
     text-align: left;
   }
 }
+
+
+/* Администрирование доступа */
+.nav-role {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.18);
+  font-size: .75rem;
+}
+.admin-lead { margin: 5px 0 0; }
+.heading-row.compact { margin-bottom: 14px; }
+.heading-row.compact h2 { margin-bottom: 4px; }
+.role-explanation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 14px;
+}
+.role-explanation {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+.role-badge,
+.access-state,
+.admin-count {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: .84rem;
+  font-weight: 700;
+}
+.role-badge.operator { color: #1e40af; background: #dbeafe; }
+.role-badge.admin { color: #6b21a8; background: #f3e8ff; }
+.access-state.active { color: #166534; background: #dcfce7; }
+.access-state.inactive { color: #991b1b; background: #fee2e2; }
+.admin-count { color: #334155; background: #e2e8f0; }
+.builtin-admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.admin-search-form {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.admin-table-wrap { margin-top: 16px; }
+.admin-table th { white-space: nowrap; }
+.admin-table td { vertical-align: middle; }
+.admin-table select { min-width: 150px; }
+.admin-add-form {
+  display: contents;
+}
+.admin-actions-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+.access-edit-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+.access-active-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.access-active-check input { width: auto; }
+.button.danger,
+button.danger {
+  background: #b91c1c;
+}
+.disabled-access-row {
+  opacity: .68;
+  background: #f8fafc;
+}
+
+@media (max-width: 850px) {
+  .role-explanation-grid { grid-template-columns: 1fr; }
+  .admin-search-form { grid-template-columns: 1fr; }
+  .access-edit-form { grid-template-columns: 1fr; }
+  .admin-actions-cell { width: auto; white-space: normal; }
+}

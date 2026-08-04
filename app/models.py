@@ -38,6 +38,26 @@ class LocalUser(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class DomainAccessUser(Base):
+    """Явно разрешенный доменный пользователь и его роль в приложении."""
+
+    __tablename__ = "domain_access_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    email: Mapped[str] = mapped_column(String(320), default="")
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.OPERATOR)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+
 class ProvisioningOperation(Base):
     __tablename__ = "provisioning_operations"
 

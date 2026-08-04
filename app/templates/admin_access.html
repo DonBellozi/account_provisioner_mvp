@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Управление доступом{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Управление доступом</h1>
+    <p class="muted admin-lead">Доменный пользователь сможет войти только после назначения роли на этой странице.</p>
+  </div>
+</div>
+
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if search_error %}<div class="alert error">Ошибка поиска в AD: {{ search_error }}</div>{% endif %}
+
+<section class="card">
+  <h2>Роли</h2>
+  <div class="role-explanation-grid">
+    <div class="role-explanation">
+      <span class="role-badge operator">Оператор</span>
+      <span>Регистрация работников, операции увольнения и просмотр журнала.</span>
+    </div>
+    <div class="role-explanation">
+      <span class="role-badge admin">Администратор</span>
+      <span>Все права оператора и доступ к управлению пользователями и настройкам.</span>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Встроенный администратор</h2>
+  <div class="builtin-admin-row">
+    <div>
+      <strong>{{ bootstrap_admin_username }}</strong>
+      <div class="muted">Локальная учетная запись аварийного доступа. Ее роль всегда остается административной.</div>
+    </div>
+    <span class="role-badge admin">Администратор</span>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Добавить пользователя домена</h2>
+  <form method="get" action="/admin/access" class="admin-search-form">
+    <label>Поиск по ФИО, логину или почте
+      <input name="q" value="{{ search_query }}" autocomplete="off" placeholder="Например: Иванов или ivanov.ii">
+    </label>
+    <button type="submit">Найти в AD</button>
+  </form>
+
+  {% if search_query and not search_results and not search_error %}
+  <div class="candidate-pool-empty">Пользователи по запросу «{{ search_query }}» не найдены.</div>
+  {% endif %}
+
+  {% if search_results %}
+  <div class="table-wrap admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Логин</th>
+          <th>Состояние AD</th>
+          <th>Роль</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in search_results %}
+        {% set assigned = assigned_by_username.get(item.username) %}
+        <tr>
+          <td>
+            <strong>{{ item.display_name or item.username }}</strong>
+            {% if item.email %}<div class="muted">{{ item.email }}</div>{% endif %}
+          </td>
+          <td><code>{{ item.username }}</code></td>
+          <td>
+            {% if item.is_enabled %}
+              <span class="access-state active">Включен</span>
+            {% else %}
+              <span class="access-state inactive">Отключен</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if assigned %}
+              <span class="role-badge {{ assigned.role.value }}">
+                {{ "Администратор" if assigned.role.value == "admin" else "Оператор" }}
+              </span>
+            {% elif item.is_enabled %}
+              <select name="role"
+                      form="add-domain-user-{{ loop.index }}"
+                      aria-label="Роль для {{ item.username }}">
+                <option value="operator">Оператор</option>
+                <option value="admin">Администратор</option>
+              </select>
+            {% else %}
+              <span class="muted">Роль не назначается</span>
+            {% endif %}
+          </td>
+          <td class="admin-actions-cell">
+            {% if assigned %}
+              <span class="muted">Уже назначен</span>
+            {% elif item.is_enabled %}
+              <form id="add-domain-user-{{ loop.index }}"
+                    method="post"
+                    action="/admin/access/users">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="username" value="{{ item.username }}">
+                <button type="submit">Добавить</button>
+              </form>
+            {% else %}
+              <span class="muted">Недоступно</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="heading-row compact">
+    <div>
+      <h2>Назначенный доступ</h2>
+      <p class="muted">Изменение роли и отключение доступа применяются при следующем запросе пользователя к приложению.</p>
+    </div>
+    <span class="admin-count">{{ assigned_users|length }}</span>
+  </div>
+
+  {% if assigned_users %}
+  <div class="table-wrap admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Логин</th>
+          <th>Роль и состояние</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for access in assigned_users %}
+        <tr class="{% if not access.is_active %}disabled-access-row{% endif %}">
+          <td>
+            <strong>{{ access.display_name or access.username }}</strong>
+            {% if access.email %}<div class="muted">{{ access.email }}</div>{% endif %}
+          </td>
+          <td><code>{{ access.username }}</code></td>
+          <td>
+            <form method="post" action="/admin/access/users/{{ access.id }}/update" class="access-edit-form">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <select name="role" aria-label="Роль {{ access.username }}">
+                <option value="operator" {% if access.role.value == "operator" %}selected{% endif %}>Оператор</option>
+                <option value="admin" {% if access.role.value == "admin" %}selected{% endif %}>Администратор</option>
+              </select>
+              <label class="access-active-check">
+                <input type="checkbox" name="is_active" {% if access.is_active %}checked{% endif %}>
+                Доступ включен
+              </label>
+              <button type="submit" class="button secondary">Сохранить</button>
+            </form>
+          </td>
+          <td class="admin-actions-cell">
+            <form method="post"
+                  action="/admin/access/users/{{ access.id }}/delete"
+                  onsubmit="return confirm('Удалить доступ для {{ access.username }}?')">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button type="submit" class="button danger">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="candidate-pool-empty">Доступ доменным пользователям пока не назначен.</div>
+  {% endif %}
+</section>
+{% endblock %}
