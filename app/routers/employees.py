@@ -44,15 +44,138 @@ def _login_candidates(last_name: str, first_name: str, middle_name: str) -> list
         return []
 
 
+def _yes_no(value: bool) -> str:
+    return "Да" if value else "Нет"
+
+
+def _provisioning_journal_item(operation: ProvisioningOperation) -> dict[str, object]:
+    full_name = " ".join(
+        part
+        for part in [
+            operation.last_name,
+            operation.first_name,
+            operation.middle_name,
+        ]
+        if part
+    )
+    status_labels = {
+        "draft": "Черновик",
+        "running": "Выполняется",
+        "partial": "Частично выполнено",
+        "success": "Успешно",
+        "failed": "Ошибка",
+    }
+    status_key = operation.status.value
+
+    return {
+        "kind": "provision",
+        "record_id": operation.id,
+        "created_at": operation.created_at,
+        "action": "Создание учетных записей",
+        "subject": full_name,
+        "login": operation.login,
+        "corporate_email": operation.corporate_email,
+        "personal_email": operation.personal_email,
+        "mail_domain": operation.mail_domain,
+        "operator": operation.operator_username,
+        "status_key": status_key,
+        "status_label": status_labels.get(status_key, status_key),
+        "details": [
+            ("ФИО", full_name),
+            ("Логин AD", operation.login),
+            ("Корпоративная почта", operation.corporate_email),
+            ("Личный адрес", operation.personal_email),
+            ("Почтовый домен", operation.mail_domain),
+            ("Учетная запись AD создана", _yes_no(operation.ad_created)),
+            ("Учетная запись AD включена", _yes_no(operation.ad_enabled)),
+            ("Ящик Zimbra создан", _yes_no(operation.zimbra_created)),
+            (
+                "Реквизиты почты отправлены на личный адрес",
+                _yes_no(operation.personal_mail_sent),
+            ),
+            (
+                "Реквизиты AD отправлены на корпоративную почту",
+                _yes_no(operation.corporate_mail_sent),
+            ),
+        ],
+        "error_message": operation.error_message,
+        "completed_at": operation.completed_at,
+    }
+
+
+def _dismissal_journal_item(schedule: DismissalSchedule) -> dict[str, object]:
+    if schedule.ad_expiration_set and schedule.zimbra_note_set:
+        status_key = "success"
+        status_label = "Успешно"
+    elif schedule.ad_expiration_set or schedule.zimbra_note_set:
+        status_key = "partial"
+        status_label = "Частично выполнено"
+    elif schedule.error_message:
+        status_key = "failed"
+        status_label = "Ошибка"
+    else:
+        status_key = "running"
+        status_label = "Выполняется"
+
+    return {
+        "kind": "dismissal",
+        "record_id": schedule.id,
+        "created_at": schedule.created_at,
+        "action": "Пометка на увольнение",
+        "subject": schedule.corporate_email or schedule.login,
+        "login": schedule.login,
+        "corporate_email": schedule.corporate_email,
+        "personal_email": "",
+        "mail_domain": "",
+        "operator": schedule.operator_username,
+        "status_key": status_key,
+        "status_label": status_label,
+        "details": [
+            ("Логин AD", schedule.login),
+            ("Корпоративная почта", schedule.corporate_email),
+            ("Дата увольнения", schedule.dismissal_date.strftime("%d.%m.%Y")),
+            (
+                "Срок действия учетной записи AD установлен",
+                _yes_no(schedule.ad_expiration_set),
+            ),
+            (
+                "Дата записана в zimbraNotes",
+                _yes_no(schedule.zimbra_note_set),
+            ),
+        ],
+        "error_message": schedule.error_message,
+        "completed_at": None,
+    }
+
+
 @router.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    operations = db.scalars(
-        select(ProvisioningOperation).order_by(desc(ProvisioningOperation.created_at)).limit(20)
+    provisioning_operations = db.scalars(
+        select(ProvisioningOperation)
+        .order_by(desc(ProvisioningOperation.created_at))
+        .limit(50)
     ).all()
+    dismissal_operations = db.scalars(
+        select(DismissalSchedule)
+        .order_by(desc(DismissalSchedule.created_at))
+        .limit(50)
+    ).all()
+
+    journal_items = [
+        *(_provisioning_journal_item(item) for item in provisioning_operations),
+        *(_dismissal_journal_item(item) for item in dismissal_operations),
+    ]
+    journal_items.sort(key=lambda item: item["created_at"], reverse=True)
+    journal_items = journal_items[:50]
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        _context(request, operations=operations, dry_run=settings.dry_run),
+        _context(
+            request,
+            journal_items=journal_items,
+            dry_run=settings.dry_run,
+        ),
     )
 
 

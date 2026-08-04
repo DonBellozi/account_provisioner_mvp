@@ -4,26 +4,97 @@
 <div class="heading-row">
   <div>
     <h1>Журнал операций</h1>
-    <p class="muted">Пароли в журнале не сохраняются.</p>
+    <p class="muted">
+      В журнале сохраняются действия, логины, адреса, даты и результаты.
+      Пароли не сохраняются и доступны только на итоговом экране и в отправленных письмах.
+    </p>
   </div>
   <a class="button" href="/employees/new">Создать работника</a>
 </div>
-{% if dry_run %}<div class="alert warning">Включен безопасный режим DRY_RUN – реальные изменения в AD, Zimbra и почте не выполняются.</div>{% endif %}
-<section class="card table-wrap">
-  <table>
-    <thead><tr><th>Дата</th><th>ФИО</th><th>Логин</th><th>Почта</th><th>Статус</th><th>Оператор</th></tr></thead>
-    <tbody>
-      {% for item in operations %}
+
+{% if dry_run %}
+<div class="alert warning">
+  Включен безопасный режим DRY_RUN – реальные изменения в AD, Zimbra и почте не выполняются.
+</div>
+{% endif %}
+
+<section class="card table-wrap journal-card">
+  <table class="journal-table">
+    <thead>
       <tr>
-        <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
-        <td>{{ item.last_name }} {{ item.first_name }} {{ item.middle_name }}</td>
-        <td><code>{{ item.login }}</code></td>
-        <td>{{ item.corporate_email }}</td>
-        <td><span class="status {{ item.status.value }}">{{ item.status.value }}</span></td>
-        <td>{{ item.operator_username }}</td>
+        <th>Дата</th>
+        <th>Действие</th>
+        <th>Объект</th>
+        <th>Статус</th>
+        <th>Оператор</th>
+        <th>Подробности</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in journal_items %}
+      <tr class="journal-main-row">
+        <td class="journal-date">
+          {{ item.created_at.strftime('%d.%m.%Y') }}
+          <span>{{ item.created_at.strftime('%H:%M') }}</span>
+        </td>
+        <td>
+          <span class="action-badge {{ item.kind }}">{{ item.action }}</span>
+        </td>
+        <td>
+          <strong>{{ item.subject }}</strong>
+          <div class="journal-object-meta">
+            {% if item.login %}<code>{{ item.login }}</code>{% endif %}
+            {% if item.corporate_email %}<span>{{ item.corporate_email }}</span>{% endif %}
+          </div>
+        </td>
+        <td>
+          <span class="status {{ item.status_key }}">{{ item.status_label }}</span>
+        </td>
+        <td>{{ item.operator }}</td>
+        <td class="journal-details-cell">
+          <details class="journal-details">
+            <summary>Открыть</summary>
+            <div class="journal-details-panel">
+              <div class="journal-details-heading">
+                <strong>{{ item.action }}</strong>
+                <span class="muted">Запись № {{ item.record_id }}</span>
+              </div>
+
+              <dl class="journal-details-grid">
+                {% for label, value in item.details %}
+                <dt>{{ label }}</dt>
+                <dd>{{ value or '–' }}</dd>
+                {% endfor %}
+                <dt>Оператор</dt>
+                <dd>{{ item.operator }}</dd>
+                <dt>Начало операции</dt>
+                <dd>{{ item.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</dd>
+                {% if item.completed_at %}
+                <dt>Завершение операции</dt>
+                <dd>{{ item.completed_at.strftime('%d.%m.%Y %H:%M:%S') }}</dd>
+                {% endif %}
+              </dl>
+
+              {% if item.error_message %}
+              <div class="journal-error">
+                <strong>Ошибки и предупреждения</strong>
+                <pre>{{ item.error_message }}</pre>
+              </div>
+              {% endif %}
+
+              {% if item.kind == 'provision' %}
+              <div class="journal-secret-note">
+                Пароли к созданным учетным записям намеренно не записываются в журнал.
+              </div>
+              {% endif %}
+            </div>
+          </details>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">Операций пока нет.</td></tr>
+      <tr>
+        <td colspan="6" class="muted">Операций пока нет.</td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
