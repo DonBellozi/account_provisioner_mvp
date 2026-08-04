@@ -136,9 +136,9 @@ class ZimbraService:
     def _zmprov_command(self) -> str:
         # zmprov – Java-приложение. В неинтерактивной SSH-сессии locale
         # пользователя может не загружаться, из-за чего национальные символы
-        # повреждаются при чтении команд из stdin. Явно фиксируем доступную на сервере UTF-8 locale C.UTF-8 для
+        # повреждаются при чтении команд из stdin. Явно фиксируем установленную на сервере locale ru_RU.utf8 для
         # каждого запуска, не изменяя глобальные настройки сервера.
-        utf8_env = "/usr/bin/env LC_ALL=C.UTF-8 LANG=C.UTF-8"
+        utf8_env = "/usr/bin/env LC_ALL=ru_RU.utf8 LANG=ru_RU.utf8"
         if self.settings.zimbra_ssh_user.strip().lower() == "zimbra":
             return f"{utf8_env} /opt/zimbra/bin/zmprov"
         return f"sudo -n -u zimbra {utf8_env} /opt/zimbra/bin/zmprov"
@@ -169,6 +169,40 @@ class ZimbraService:
         err = stderr.read().decode("utf-8", errors="replace").strip()
         combined = f"{err}\n{out}"
         not_found = "NO_SUCH_ACCOUNT" in combined or "account.NO_SUCH_ACCOUNT" in combined
+
+        if not_found:
+            if allow_not_found:
+                return out
+            raise RuntimeError(err or out or "account.NO_SUCH_ACCOUNT")
+
+        if code != 0:
+            raise RuntimeError(f"zmprov завершился с кодом {code}: {err or out}")
+        return out
+
+    def _execute_zmprov_direct(
+        self,
+        client: paramiko.SSHClient,
+        args: list[str],
+        allow_not_found: bool = False,
+    ) -> str:
+        """Выполнить zmprov с аргументами командной строки.
+
+        Этот режим применяется только для команд без паролей и других
+        секретов. Он обходит интерактивный stdin-парсер zmprov, который на
+        данном сервере повреждает кириллицу, несмотря на UTF-8 locale.
+        """
+        command = f"{self._zmprov_command()} {shlex.join(args)}"
+        stdin, stdout, stderr = client.exec_command(command, timeout=30)
+        stdin.channel.shutdown_write()
+
+        code = stdout.channel.recv_exit_status()
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        err = stderr.read().decode("utf-8", errors="replace").strip()
+        combined = f"{err}\n{out}"
+        not_found = (
+            "NO_SUCH_ACCOUNT" in combined
+            or "account.NO_SUCH_ACCOUNT" in combined
+        )
 
         if not_found:
             if allow_not_found:
@@ -229,6 +263,28 @@ class ZimbraService:
         client = self._client()
         try:
             return self._execute_zmprov(client, args, allow_not_found=allow_not_found)
+        finally:
+            client.close()
+
+    def _run_zmprov_direct(
+        self,
+        args: list[str],
+        allow_not_found: bool = False,
+        mutating: bool = True,
+    ) -> str:
+        """Запустить команду без секретов через обычные аргументы процесса."""
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+        if mutating and self.settings.dry_run:
+            return "DRY-RUN"
+
+        client = self._client()
+        try:
+            return self._execute_zmprov_direct(
+                client,
+                args,
+                allow_not_found=allow_not_found,
+            )
         finally:
             client.close()
 
@@ -532,10 +588,19 @@ class ZimbraService:
             part for part in [last_name, first_name, middle_name] if part
         )
 
-        args = [
-            "ca",
+        # Пароль остается вне аргументов процесса: создание ящика передаем
+        # через stdin. На этом этапе используются только ASCII-значения.
+        create_args = ["ca", primary_email, password]
+        if self.settings.zimbra_cos_id:
+            create_args.extend(["zimbraCOSId", self.settings.zimbra_cos_id])
+        self._run_zmprov(create_args)
+
+        # Кириллические атрибуты передаем отдельной обычной командой `ma`.
+        # Ручная проверка на сервере подтвердила, что именно этот режим с
+        # ru_RU.utf8 сохраняет русские буквы корректно.
+        profile_args = [
+            "ma",
             primary_email,
-            password,
             "displayName",
             display_name,
             "zimbraPrefFromDisplay",
@@ -546,11 +611,23 @@ class ZimbraService:
         if middle_name:
             # В учетной записи Zimbra поле Middle Name / Отчество
             # хранится в стандартном LDAP-атрибуте initials.
-            args.extend(["initials", middle_name])
-        args.extend(["sn", last_name])
-        if self.settings.zimbra_cos_id:
-            args.extend(["zimbraCOSId", self.settings.zimbra_cos_id])
-        self._run_zmprov(args)
+            profile_args.extend(["initials", middle_name])
+        profile_args.extend(["sn", last_name])
+
+        try:
+            self._run_zmprov_direct(profile_args)
+        except Exception as profile_exc:
+            # После разделения команд не оставляем пустой тестовый ящик,
+            # если запись ФИО завершилась ошибкой.
+            if not self.settings.dry_run:
+                try:
+                    self._run_zmprov_direct(["da", primary_email])
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        "Ящик создан, но ФИО не записано; также не удалось "
+                        f"удалить неполную учетную запись: {rollback_exc}"
+                    ) from profile_exc
+            raise
 
         aliases: list[str] = []
         if (
