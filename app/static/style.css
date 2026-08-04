@@ -377,3 +377,52 @@ button.danger {
   .access-edit-form { grid-template-columns: 1fr; }
   .admin-actions-cell { width: auto; white-space: normal; }
 }
+
+
+/* Кнопка создания в строке результата проверки логина */
+.login-check-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+.login-check-action-row .login-check-summary {
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+}
+.provision-button-cell {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 8px 12px;
+  background: #f8fafc;
+}
+.provision-inline-button {
+  min-width: 220px;
+  min-height: 42px;
+  background: #2563eb;
+  color: #ffffff;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.provision-inline-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+.provision-inline-button:disabled {
+  opacity: 1;
+  background: #bfdbfe;
+  color: #1e40af;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .login-check-action-row {
+    grid-template-columns: 1fr;
+  }
+  .provision-button-cell {
+    padding: 10px 14px 14px;
+  }
+  .provision-inline-button {
+    width: 100%;
+    min-width: 0;
+  }
+}

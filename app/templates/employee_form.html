@@ -88,8 +88,18 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
           Проверяется
         </span>
       </div>
-      <div class="login-check-summary checking" id="login-check-summary">
-        Идет проверка выбранного логина...
+      <div class="login-check-action-row">
+        <div class="login-check-summary checking" id="login-check-summary">
+          Идет проверка выбранного логина...
+        </div>
+        <div class="provision-button-cell">
+          <button type="submit"
+                  class="provision-inline-button"
+                  id="provision-button"
+                  disabled>
+            Создать учетные записи
+          </button>
+        </div>
       </div>
     </div>
 
@@ -123,7 +133,6 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
   </section>
 
   <div class="alert warning">Перед созданием выбранный логин будет проверен сервером еще раз. Пароли отобразятся только на итоговой странице и не сохранятся в базе.</div>
-  <button type="submit" class="primary large" id="provision-button" disabled>Создать учетные записи</button>
   <noscript><div class="alert error">Для интерактивной проверки логина требуется JavaScript.</div></noscript>
 </form>
 
@@ -142,6 +151,7 @@ let activeControllers = [];
 let candidatePoolController = null;
 let lastCheckedLogin = '';
 let loginCheckReady = false;
+let candidatePoolReady = candidateLogins.length === 0;
 let operatorChangedLogin = false;
 const candidateResultMap = new Map();
 let latestCandidateItems = [];
@@ -213,10 +223,27 @@ function setSummary(state, text) {
   summary.textContent = text;
 }
 
+function updateProvisionButtonState() {
+  const enabled = loginCheckReady && candidatePoolReady;
+  provisionButton.disabled = !enabled;
+
+  if (enabled) {
+    provisionButton.title = '';
+  } else if (!candidatePoolReady) {
+    provisionButton.title = 'Дождитесь проверки всех стандартных вариантов логина';
+  } else {
+    provisionButton.title = 'Дождитесь успешной проверки выбранного логина';
+  }
+}
+
 function setProvisionEnabled(enabled) {
   loginCheckReady = enabled;
-  provisionButton.disabled = !enabled;
-  provisionButton.title = enabled ? '' : 'Сначала дождитесь успешной проверки логина';
+  updateProvisionButtonState();
+}
+
+function setCandidatePoolReady(ready) {
+  candidatePoolReady = ready;
+  updateProvisionButtonState();
 }
 
 
@@ -528,9 +555,11 @@ function renderCandidatePool(items) {
 
 async function checkCandidatePool() {
   if (!candidateLogins.length) {
+    setCandidatePoolReady(true);
     return;
   }
 
+  setCandidatePoolReady(false);
   renderCandidatePoolChecking();
   if (candidatePoolController) {
     candidatePoolController.abort();
@@ -557,6 +586,7 @@ async function checkCandidatePool() {
     if (!response.ok || !data.ok) {
       throw new Error(data.error || `Ошибка HTTP ${response.status}`);
     }
+    setCandidatePoolReady(true);
     renderCandidatePool(data.items || []);
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -571,6 +601,7 @@ async function checkCandidatePool() {
       message.textContent = `Не удалось проверить варианты: ${error.message}`;
       list.appendChild(message);
     }
+    setCandidatePoolReady(false);
     if (summary) {
       summary.className = 'candidate-pool-summary error';
       summary.textContent = 'Ошибка фоновой проверки';
@@ -584,10 +615,28 @@ async function checkCandidatePool() {
 });
 
 loginInput.addEventListener('input', scheduleLoginCheck);
-checkButton.addEventListener('click', runLoginCheck);
+checkButton.addEventListener('click', async () => {
+  if (!candidateLogins.length) {
+    runLoginCheck();
+    return;
+  }
+
+  await checkCandidatePool();
+
+  const currentLogin = valueOf('login').toLowerCase();
+  if (!candidateResultMap.has(currentLogin)) {
+    runLoginCheck();
+  }
+});
 
 provisionForm.addEventListener('submit', event => {
   const currentLogin = valueOf('login').toLowerCase();
+
+  if (!candidatePoolReady) {
+    event.preventDefault();
+    setSummary('warning', 'Сначала дождитесь полной проверки стандартных вариантов логина.');
+    return;
+  }
 
   if (!loginCheckReady || lastCheckedLogin !== currentLogin) {
     event.preventDefault();
@@ -601,6 +650,7 @@ provisionForm.addEventListener('submit', event => {
 });
 
 updatePreview();
+updateProvisionButtonState();
 if (candidateLogins.length) {
   checkCandidatePool();
 } else {
