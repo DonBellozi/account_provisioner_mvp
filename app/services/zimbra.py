@@ -134,9 +134,14 @@ class ZimbraService:
         return client
 
     def _zmprov_command(self) -> str:
+        # zmprov – Java-приложение. В неинтерактивной SSH-сессии locale
+        # пользователя может не загружаться, из-за чего национальные символы
+        # повреждаются при чтении команд из stdin. Явно фиксируем UTF-8 для
+        # каждого запуска, не изменяя глобальные настройки сервера.
+        utf8_env = "/usr/bin/env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8"
         if self.settings.zimbra_ssh_user.strip().lower() == "zimbra":
-            return "/opt/zimbra/bin/zmprov"
-        return "sudo -n -u zimbra /opt/zimbra/bin/zmprov"
+            return f"{utf8_env} /opt/zimbra/bin/zmprov"
+        return f"sudo -n -u zimbra {utf8_env} /opt/zimbra/bin/zmprov"
 
     def _execute_zmprov(
         self,
@@ -151,11 +156,15 @@ class ZimbraService:
         # При передаче Python str кириллица в некоторых версиях превращается
         # в младшие байты Unicode: «Тестов» -> «"5AB>2».
         payload = (shlex.join(args) + "\n").encode("utf-8")
-        stdin.write(payload)
-        stdin.flush()
-        stdin.channel.shutdown_write()
 
-        code = stdout.channel.recv_exit_status()
+        # Пишем непосредственно в SSH-канал, минуя текстовую файловую
+        # обертку Paramiko. Так на удаленную сторону гарантированно уходят
+        # именно подготовленные UTF-8 bytes без промежуточного преобразования.
+        channel = stdin.channel
+        channel.sendall(payload)
+        channel.shutdown_write()
+
+        code = channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace").strip()
         err = stderr.read().decode("utf-8", errors="replace").strip()
         combined = f"{err}\n{out}"
