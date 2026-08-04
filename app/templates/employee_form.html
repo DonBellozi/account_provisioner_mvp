@@ -7,15 +7,25 @@
 {% if not parsed %}
 <section class="card">
   <h2>Вставьте две строки</h2>
-  <form method="post" action="/employees/parse" class="stack">
+  <form method="post" action="/employees/parse" class="stack" id="parse-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>ФИО и личный email
-      <textarea name="raw_input" rows="5" required placeholder="Иванов Иван Иванович&#10;ivanov.personal@example.com"></textarea>
+      <textarea name="raw_input" rows="5" required placeholder="Иванов Иван Иванович&#10;ivanov.personal@example.com">{{ raw_input|default('') }}</textarea>
     </label>
     <p class="muted">Система определит строку с email, разложит ФИО по полям и проверит, что в имени нет случайных латинских букв.</p>
-    <button type="submit">Разобрать и проверить логин</button>
+    <button type="submit" id="parse-button">Разобрать и проверить логин</button>
   </form>
 </section>
+
+<script>
+document.getElementById('parse-form')?.addEventListener('submit', () => {
+  const button = document.getElementById('parse-button');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Разбираю данные...';
+  }
+});
+</script>
 {% else %}
 <form method="post" action="/employees/provision" class="stack" id="provision-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -30,29 +40,56 @@
   </section>
 
   <section class="card">
-    <h2>Подбор логина</h2>
-    <p>Варианты проверяются последовательно только по логину – сначала в AD, затем во всех доменах Zimbra.</p>
+    <h2>Логин</h2>
+    <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а их состояния обновляются ниже.</p>
+
     {% if candidates %}
-    <div class="candidate-list">
-      {% for item in candidates %}
-      <label class="candidate {% if not item.free %}occupied{% endif %}">
-        <input type="radio" name="candidate" value="{{ item.login }}"
-               {% if selected_login|default('') == item.login %}checked{% endif %}
-               {% if not item.free %}disabled{% endif %}
-               onclick="selectLogin(this.value)">
-        <code>{{ item.login }}</code>
-        {% if item.free %}
-          <span>свободен – предлагается для регистрации</span>
-        {% else %}
-          <span>занят: {% if item.occupied.ad %}AD {% endif %}{% if item.occupied.zimbra %}Zimbra{% endif %}</span>
-        {% endif %}
-      </label>
+    <div class="login-suggestions" aria-label="Стандартные варианты логина">
+      {% for candidate in candidates %}
+      <button type="button"
+              class="candidate-option{% if selected_login|default('') == candidate %} active{% endif %}"
+              data-login="{{ candidate }}"
+              onclick="selectLogin('{{ candidate }}')">
+        <code>{{ candidate }}</code>
+      </button>
       {% endfor %}
     </div>
+    <p class="muted">Можно выбрать предложенный вариант или ввести собственный логин.</p>
     {% endif %}
-    <label>Предлагаемый или собственный логин
-      <input id="login" name="login" value="{{ selected_login|default('') }}" pattern="[a-z][a-z0-9.-]{0,19}" maxlength="20" required oninput="updatePreview()">
-    </label>
+
+    <div class="login-input-row">
+      <label>Предлагаемый или собственный логин
+        <input id="login"
+               name="login"
+               value="{{ selected_login|default('') }}"
+               pattern="[a-z][a-z0-9.-]{0,19}"
+               maxlength="20"
+               required
+               autocomplete="off">
+      </label>
+      <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
+    </div>
+
+    <div class="login-check-panel" id="login-check-panel" aria-live="polite">
+      <div class="login-check-row">
+        <span class="login-check-name">Active Directory</span>
+        <span class="login-check-status checking" id="ad-check-status">
+          <span class="spinner" aria-hidden="true"></span>
+          Проверяется
+        </span>
+      </div>
+      <div class="login-check-row">
+        <span class="login-check-name">Zimbra</span>
+        <span class="login-check-status checking" id="zimbra-check-status">
+          <span class="spinner" aria-hidden="true"></span>
+          Проверяется
+        </span>
+      </div>
+      <div class="login-check-summary checking" id="login-check-summary">
+        Идет проверка выбранного логина...
+      </div>
+    </div>
+
     <p class="muted">Основной порядок: <code>фамилия.ио</code>, затем <code>фамилия.и</code>, затем <code>фамилия</code>. При дальнейших совпадениях добавляются буквы имени или отчества, без порядковых номеров.</p>
   </section>
 
@@ -80,33 +117,264 @@
     </div>
   </section>
 
-  <div class="alert warning">Перед созданием выбранный логин будет проверен еще раз. Пароли отобразятся только на итоговой странице и не сохранятся в базе.</div>
-  <button type="submit" class="primary large">Создать учетные записи</button>
+  <div class="alert warning">Перед созданием выбранный логин будет проверен сервером еще раз. Пароли отобразятся только на итоговой странице и не сохранятся в базе.</div>
+  <button type="submit" class="primary large" id="provision-button" disabled>Создать учетные записи</button>
+  <noscript><div class="alert error">Для интерактивной проверки логина требуется JavaScript.</div></noscript>
 </form>
 
 <script>
+const LOGIN_PATTERN = /^[a-z][a-z0-9.-]{0,19}$/;
+const provisionForm = document.getElementById('provision-form');
+const provisionButton = document.getElementById('provision-button');
+const loginInput = document.getElementById('login');
+const checkButton = document.getElementById('check-login-button');
+
+let checkSequence = 0;
+let debounceTimer = null;
+let activeControllers = [];
+let lastCheckedLogin = '';
+let loginCheckReady = false;
+let sourceResults = {
+  ad: null,
+  zimbra: null,
+};
+
 function valueOf(id) {
   return (document.getElementById(id)?.value || '').trim();
 }
+
 function selectLogin(login) {
-  document.getElementById('login').value = login;
+  loginInput.value = login;
+  updateSuggestionSelection();
   updatePreview();
+  runLoginCheck();
 }
+
+function updateSuggestionSelection() {
+  const current = valueOf('login');
+  document.querySelectorAll('.candidate-option').forEach(button => {
+    button.classList.toggle('active', button.dataset.login === current);
+  });
+}
+
 function updatePreview() {
   const last = valueOf('last_name');
   const first = valueOf('first_name');
   const middle = valueOf('middle_name');
   const login = valueOf('login');
   const domain = valueOf('mail_domain');
+
   document.getElementById('preview-last').textContent = last || '–';
   document.getElementById('preview-first').textContent = first || '–';
   document.getElementById('preview-display').textContent = [last, first, middle].filter(Boolean).join(' ') || '–';
   document.getElementById('preview-mail').textContent = login && domain ? `${login}@${domain}` : '–';
 }
+
+function statusElement(source) {
+  return document.getElementById(`${source}-check-status`);
+}
+
+function setSourceStatus(source, state, text) {
+  const element = statusElement(source);
+  element.className = `login-check-status ${state}`;
+  element.replaceChildren();
+
+  if (state === 'checking') {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    element.appendChild(spinner);
+  }
+
+  element.appendChild(document.createTextNode(text));
+}
+
+function setSummary(state, text) {
+  const summary = document.getElementById('login-check-summary');
+  summary.className = `login-check-summary ${state}`;
+  summary.textContent = text;
+}
+
+function setProvisionEnabled(enabled) {
+  loginCheckReady = enabled;
+  provisionButton.disabled = !enabled;
+  provisionButton.title = enabled ? '' : 'Сначала дождитесь успешной проверки логина';
+}
+
+function cancelActiveChecks() {
+  activeControllers.forEach(controller => controller.abort());
+  activeControllers = [];
+}
+
+function resetForInvalidLogin() {
+  cancelActiveChecks();
+  checkSequence += 1;
+  lastCheckedLogin = '';
+  sourceResults = {ad: null, zimbra: null};
+  setProvisionEnabled(false);
+  setSourceStatus('ad', 'waiting', 'Ожидает корректный логин');
+  setSourceStatus('zimbra', 'waiting', 'Ожидает корректный логин');
+  setSummary('warning', 'Логин должен начинаться с латинской буквы и содержать не более 20 символов.');
+}
+
+async function checkSource(source, login, sequence) {
+  const controller = new AbortController();
+  activeControllers.push(controller);
+
+  try {
+    const response = await fetch(
+      `/employees/check-login/${source}?login=${encodeURIComponent(login)}`,
+      {
+        method: 'GET',
+        headers: {'Accept': 'application/json'},
+        cache: 'no-store',
+        signal: controller.signal,
+      },
+    );
+
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('Сервер вернул некорректный ответ');
+    }
+
+    if (sequence !== checkSequence) {
+      return null;
+    }
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `Ошибка HTTP ${response.status}`);
+    }
+
+    if (!data.enabled) {
+      setSourceStatus(source, 'disabled', 'Проверка отключена');
+      return {source, completed: true, occupied: false, disabled: true, error: false};
+    }
+
+    if (data.occupied) {
+      setSourceStatus(source, 'occupied', 'Занят');
+      return {source, completed: true, occupied: true, disabled: false, error: false};
+    }
+
+    setSourceStatus(source, 'free', 'Свободен');
+    return {source, completed: true, occupied: false, disabled: false, error: false};
+  } catch (error) {
+    if (error.name === 'AbortError' || sequence !== checkSequence) {
+      return null;
+    }
+    setSourceStatus(source, 'error', `Ошибка: ${error.message}`);
+    return {source, completed: true, occupied: false, disabled: false, error: true};
+  }
+}
+
+function updateOverallResult(login, sequence) {
+  if (sequence !== checkSequence) {
+    return;
+  }
+
+  const results = Object.values(sourceResults);
+  if (results.some(result => result === null)) {
+    return;
+  }
+
+  if (results.some(result => result.error)) {
+    lastCheckedLogin = '';
+    setProvisionEnabled(false);
+    setSummary('error', 'Не удалось завершить все проверки. Исправьте подключение или повторите проверку.');
+    return;
+  }
+
+  const occupiedLabels = [];
+  if (sourceResults.ad.occupied) {
+    occupiedLabels.push('Active Directory');
+  }
+  if (sourceResults.zimbra.occupied) {
+    occupiedLabels.push('Zimbra');
+  }
+
+  lastCheckedLogin = login;
+
+  if (occupiedLabels.length > 0) {
+    setProvisionEnabled(false);
+    setSummary(
+      'occupied',
+      `Логин «${login}» занят: ${occupiedLabels.join(' и ')}. Введите другой логин или выберите вариант выше.`,
+    );
+    return;
+  }
+
+  setProvisionEnabled(true);
+  setSummary('free', `Логин «${login}» свободен и может быть зарегистрирован.`);
+}
+
+async function runLoginCheck() {
+  clearTimeout(debounceTimer);
+  const login = valueOf('login').toLowerCase();
+  loginInput.value = login;
+  updateSuggestionSelection();
+  updatePreview();
+
+  if (!LOGIN_PATTERN.test(login)) {
+    resetForInvalidLogin();
+    return;
+  }
+
+  cancelActiveChecks();
+  const sequence = ++checkSequence;
+  sourceResults = {ad: null, zimbra: null};
+  lastCheckedLogin = '';
+  setProvisionEnabled(false);
+
+  setSourceStatus('ad', 'checking', 'Проверяется');
+  setSourceStatus('zimbra', 'checking', 'Проверяется');
+  setSummary('checking', `Проверяется логин «${login}»...`);
+
+  const checks = ['ad', 'zimbra'].map(async source => {
+    const result = await checkSource(source, login, sequence);
+    if (sequence !== checkSequence || result === null) {
+      return;
+    }
+    sourceResults[source] = result;
+    updateOverallResult(login, sequence);
+  });
+
+  await Promise.all(checks);
+}
+
+function scheduleLoginCheck() {
+  updateSuggestionSelection();
+  updatePreview();
+  setProvisionEnabled(false);
+
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(runLoginCheck, 450);
+}
+
 ['last_name', 'first_name', 'middle_name'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updatePreview);
 });
+
+loginInput.addEventListener('input', scheduleLoginCheck);
+checkButton.addEventListener('click', runLoginCheck);
+
+provisionForm.addEventListener('submit', event => {
+  const currentLogin = valueOf('login').toLowerCase();
+
+  if (!loginCheckReady || lastCheckedLogin !== currentLogin) {
+    event.preventDefault();
+    setSummary('warning', 'Сначала дождитесь проверки текущего логина.');
+    runLoginCheck();
+    return;
+  }
+
+  provisionButton.disabled = true;
+  provisionButton.textContent = 'Создание учетных записей...';
+});
+
 updatePreview();
+updateSuggestionSelection();
+runLoginCheck();
 </script>
 {% endif %}
 {% endblock %}

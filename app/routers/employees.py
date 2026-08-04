@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -33,18 +35,11 @@ def _domains(settings: Settings) -> list[str]:
     )
 
 
-def _check_candidates(service: ProvisioningService, last_name: str, first_name: str, middle_name: str):
-    """Check candidates in sequence and stop at the first free login."""
-    checked: list[dict[str, object]] = []
-    selected_login = ""
-    for login in build_login_candidates(last_name, first_name, middle_name):
-        occupied = service.check_login(login)
-        free = not any(occupied.values())
-        checked.append({"login": login, "occupied": occupied, "free": free})
-        if free:
-            selected_login = login
-            break
-    return checked, selected_login
+def _login_candidates(last_name: str, first_name: str, middle_name: str) -> list[str]:
+    try:
+        return build_login_candidates(last_name, first_name, middle_name)
+    except Exception:
+        return []
 
 
 @router.get("/")
@@ -70,6 +65,7 @@ def new_employee(request: Request, settings: Settings = Depends(get_settings)):
             parsed=None,
             candidates=[],
             error="",
+            raw_input="",
             domain_mode=settings.zimbra_domain_mode,
         ),
     )
@@ -85,18 +81,18 @@ def parse_employee(
     validate_csrf(request, csrf)
     try:
         parsed = parse_two_line_input(raw_input)
-        service = ProvisioningService(settings)
-        candidates, selected_login = _check_candidates(
-            service,
+        candidates = build_login_candidates(
             parsed.last_name,
             parsed.first_name,
             parsed.middle_name,
         )
-        if not selected_login:
-            raise RuntimeError(
-                "Не удалось подобрать свободный логин по стандартным правилам. "
-                "Введите собственный вариант и выполните регистрацию."
-            )
+        if not candidates:
+            raise RuntimeError("Не удалось сформировать логин из ФИО")
+
+        # Внешние системы здесь больше не проверяются. Следующий экран
+        # открывается сразу, а AD и Zimbra проверяются отдельными запросами.
+        selected_login = candidates[0]
+
         return templates.TemplateResponse(
             request,
             "employee_form.html",
@@ -107,6 +103,7 @@ def parse_employee(
                 candidates=candidates,
                 selected_login=selected_login,
                 error="",
+                raw_input=raw_input,
                 domain_mode=settings.zimbra_domain_mode,
             ),
         )
@@ -120,9 +117,82 @@ def parse_employee(
                 parsed=None,
                 candidates=[],
                 error=str(exc),
+                raw_input=raw_input,
                 domain_mode=settings.zimbra_domain_mode,
             ),
             status_code=400,
+        )
+
+
+@router.get("/employees/check-login/{source}")
+def check_login_source(
+    source: str,
+    request: Request,
+    login: str,
+    settings: Settings = Depends(get_settings),
+):
+    # Запрос доступен только авторизованному оператору.
+    get_current_user(request)
+
+    normalized_login = login.strip().lower()
+    if not LOGIN_RE.fullmatch(normalized_login):
+        return JSONResponse(
+            {
+                "ok": False,
+                "source": source,
+                "error": "Некорректный формат логина",
+            },
+            status_code=400,
+        )
+
+    started = time.perf_counter()
+    try:
+        if source == "ad":
+            enabled = settings.ad_check_enabled
+            occupied = (
+                ActiveDirectoryService(settings).login_exists(normalized_login)
+                if enabled
+                else False
+            )
+            label = "Active Directory"
+        elif source == "zimbra":
+            enabled = settings.zimbra_check_enabled
+            occupied = (
+                ZimbraService(settings).login_exists_any_domain(normalized_login)
+                if enabled
+                else False
+            )
+            label = "Zimbra"
+        else:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "source": source,
+                    "error": "Неизвестный источник проверки",
+                },
+                status_code=404,
+            )
+
+        return {
+            "ok": True,
+            "source": source,
+            "label": label,
+            "login": normalized_login,
+            "enabled": enabled,
+            "occupied": occupied,
+            "free": not occupied,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000),
+        }
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "source": source,
+                "login": normalized_login,
+                "error": str(exc),
+                "elapsed_ms": round((time.perf_counter() - started) * 1000),
+            },
+            status_code=503,
         )
 
 
@@ -193,8 +263,9 @@ def provision_employee(
                 request,
                 domains=_domains(settings),
                 parsed=parsed,
-                candidates=[],
+                candidates=_login_candidates(last_name, first_name, middle_name),
                 error=str(exc),
+                raw_input="",
                 domain_mode=settings.zimbra_domain_mode,
                 selected_login=login,
                 selected_domain=mail_domain,

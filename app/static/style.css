@@ -35,6 +35,10 @@ button, .button {
   background: #2563eb; color: white; font-weight: 700; text-decoration: none; cursor: pointer;
 }
 button.large { padding: 14px 22px; font-size: 1rem; }
+button:disabled, .button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
 .button.secondary { background: #64748b; }
 .heading-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
 .alert { border-radius: 9px; padding: 13px 15px; margin-bottom: 18px; }
@@ -60,13 +64,108 @@ th { background: #f8fafc; }
 .credential-row:last-child { border-bottom: 0; }
 code { font-family: Consolas, monospace; word-break: break-all; }
 .actions { display: flex; gap: 12px; margin-bottom: 16px; }
+.check-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; font-weight: 600; }
+.check-row input { width: auto; margin-top: 3px; }
+.state-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px 20px; }
+.alert ul { margin-bottom: 0; }
+
+.login-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 14px 0 10px;
+}
+.candidate-option {
+  background: #fff;
+  color: #1e3a5f;
+  border: 1px solid #bfdbfe;
+  padding: 9px 12px;
+}
+.candidate-option:hover {
+  background: #eff6ff;
+}
+.candidate-option.active {
+  background: #dbeafe;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb;
+}
+.login-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.check-again {
+  white-space: nowrap;
+}
+.login-check-panel {
+  margin-top: 16px;
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+.login-check-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, auto);
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.login-check-name {
+  font-weight: 700;
+}
+.login-check-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-weight: 700;
+  text-align: right;
+}
+.login-check-status.checking { color: #1d4ed8; }
+.login-check-status.free { color: #166534; }
+.login-check-status.occupied { color: #991b1b; }
+.login-check-status.error { color: #991b1b; }
+.login-check-status.waiting,
+.login-check-status.disabled { color: #64748b; }
+.login-check-summary {
+  padding: 13px 14px;
+  font-weight: 700;
+}
+.login-check-summary.checking { background: #eff6ff; color: #1e40af; }
+.login-check-summary.free { background: #dcfce7; color: #166534; }
+.login-check-summary.occupied,
+.login-check-summary.error { background: #fee2e2; color: #991b1b; }
+.login-check-summary.warning { background: #fef3c7; color: #854d0e; }
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: login-check-spin .75s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes login-check-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 700px) {
   .topbar, .heading-row { align-items: flex-start; flex-direction: column; }
   nav { flex-wrap: wrap; }
   .grid.two { grid-template-columns: 1fr; }
   .credential-row { grid-template-columns: 1fr; gap: 5px; }
+  .login-input-row { grid-template-columns: 1fr; }
+  .check-again { width: 100%; }
+  .login-check-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .login-check-status {
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
-.check-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; font-weight: 600; }
-.check-row input { width: auto; margin-top: 3px; }
-.state-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px 20px; }
-.alert ul { margin-bottom: 0; }
