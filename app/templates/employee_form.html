@@ -143,6 +143,7 @@ let candidatePoolController = null;
 let lastCheckedLogin = '';
 let loginCheckReady = false;
 let operatorChangedLogin = false;
+const candidateResultMap = new Map();
 let sourceResults = {
   ad: null,
   zimbra: null,
@@ -159,7 +160,10 @@ function selectLogin(login, automatic = false) {
   loginInput.value = login;
   updateSuggestionSelection();
   updatePreview();
-  runLoginCheck();
+
+  if (!applyCandidateResult(login)) {
+    runLoginCheck();
+  }
 }
 
 function updateSuggestionSelection() {
@@ -211,6 +215,40 @@ function setProvisionEnabled(enabled) {
   loginCheckReady = enabled;
   provisionButton.disabled = !enabled;
   provisionButton.title = enabled ? '' : 'Сначала дождитесь успешной проверки логина';
+}
+
+
+function applyCandidateResult(login) {
+  const normalized = (login || '').trim().toLowerCase();
+  const item = candidateResultMap.get(normalized);
+  if (!item) {
+    return false;
+  }
+
+  cancelActiveChecks();
+  const sequence = ++checkSequence;
+  lastCheckedLogin = normalized;
+  sourceResults = {
+    ad: {
+      source: 'ad',
+      completed: true,
+      occupied: Boolean(item.ad),
+      disabled: false,
+      error: false,
+    },
+    zimbra: {
+      source: 'zimbra',
+      completed: true,
+      occupied: Boolean(item.zimbra),
+      disabled: false,
+      error: false,
+    },
+  };
+
+  setSourceStatus('ad', item.ad ? 'occupied' : 'free', item.ad ? 'Занят' : 'Свободен');
+  setSourceStatus('zimbra', item.zimbra ? 'occupied' : 'free', item.zimbra ? 'Занят' : 'Свободен');
+  updateOverallResult(normalized, sequence);
+  return true;
 }
 
 function cancelActiveChecks() {
@@ -406,6 +444,9 @@ function renderCandidatePool(items) {
     return;
   }
 
+  candidateResultMap.clear();
+  items.forEach(item => candidateResultMap.set(item.login, item));
+
   const freeItems = items.filter(item => item.free);
   const occupiedCount = items.length - freeItems.length;
   list.replaceChildren();
@@ -450,9 +491,15 @@ function renderCandidatePool(items) {
   updateSuggestionSelection();
 
   const currentLogin = valueOf('login').toLowerCase();
-  const currentResult = items.find(item => item.login === currentLogin);
+  const currentResult = candidateResultMap.get(currentLogin);
+
   if (!operatorChangedLogin && currentResult && !currentResult.free && freeItems.length > 0) {
     selectLogin(freeItems[0].login, true);
+    return;
+  }
+
+  if (currentResult) {
+    applyCandidateResult(currentLogin);
   }
 }
 
@@ -505,6 +552,7 @@ async function checkCandidatePool() {
       summary.className = 'candidate-pool-summary error';
       summary.textContent = 'Ошибка фоновой проверки';
     }
+    runLoginCheck();
   }
 }
 
@@ -530,8 +578,11 @@ provisionForm.addEventListener('submit', event => {
 });
 
 updatePreview();
-runLoginCheck();
-checkCandidatePool();
+if (candidateLogins.length) {
+  checkCandidatePool();
+} else {
+  runLoginCheck();
+}
 </script>
 {% endif %}
 {% endblock %}

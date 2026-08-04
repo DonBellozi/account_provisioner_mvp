@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shlex
+import threading
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,6 +19,17 @@ class ZimbraCreateResult:
 
 
 class ZimbraService:
+    # Результаты коротко кэшируются, чтобы фоновая проверка списка,
+    # проверка выбранного логина и повторная проверка не запускали несколько
+    # одинаковых JVM-процессов zmprov подряд.
+    _CACHE_TTL_SECONDS = 45.0
+    _cache_lock = threading.Lock()
+    _query_lock = threading.Lock()
+    _login_cache: dict[
+        tuple[str, int, tuple[str, ...], str],
+        tuple[float, bool],
+    ] = {}
+
     def __init__(self, settings: Settings):
         self.settings = settings
 
@@ -78,6 +91,9 @@ class ZimbraService:
 
         try:
             client.connect(**connect_kwargs)
+            transport = client.get_transport()
+            if transport is not None:
+                transport.set_keepalive(15)
         except Exception:
             client.close()
             raise
@@ -120,11 +136,8 @@ class ZimbraService:
         client: paramiko.SSHClient,
         args: list[str],
     ) -> str:
-        # Проверки выполняем не в интерактивном режиме, а отдельной командой
-        # `zmprov -l ga ...`. В этом режиме zmprov возвращает корректный код
-        # завершения и однозначную ошибку NO_SUCH_ACCOUNT.
         command = f"{self._zmprov_command()} -l {shlex.join(args)}"
-        stdin, stdout, stderr = client.exec_command(command, timeout=30)
+        stdin, stdout, stderr = client.exec_command(command, timeout=45)
         stdin.channel.shutdown_write()
 
         code = stdout.channel.recv_exit_status()
@@ -160,6 +173,135 @@ class ZimbraService:
         message = str(exc)
         return "NO_SUCH_ACCOUNT" in message or "account.NO_SUCH_ACCOUNT" in message
 
+    @staticmethod
+    def _escape_ldap_filter_value(value: str) -> str:
+        return (
+            value.replace("\\", r"\5c")
+            .replace("*", r"\2a")
+            .replace("(", r"\28")
+            .replace(")", r"\29")
+            .replace("\x00", r"\00")
+        )
+
+    def _cache_key(self, login: str) -> tuple[str, int, tuple[str, ...], str]:
+        domains = tuple(domain.strip().lower() for domain in self.settings.zimbra_domains)
+        return (
+            self.settings.zimbra_ssh_host.strip().lower(),
+            self.settings.zimbra_ssh_port,
+            domains,
+            login.strip().lower(),
+        )
+
+    def _cache_get(self, login: str) -> bool | None:
+        key = self._cache_key(login)
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._login_cache.get(key)
+            if cached is None:
+                return None
+            stored_at, exists = cached
+            if now - stored_at > self._CACHE_TTL_SECONDS:
+                self._login_cache.pop(key, None)
+                return None
+            return exists
+
+    def _cache_set(self, login: str, exists: bool) -> None:
+        key = self._cache_key(login)
+        with self._cache_lock:
+            self._login_cache[key] = (time.monotonic(), exists)
+
+    def _cache_remove(self, login: str) -> None:
+        key = self._cache_key(login)
+        with self._cache_lock:
+            self._login_cache.pop(key, None)
+
+    def _search_existing_logins(
+        self,
+        client: paramiko.SSHClient,
+        logins: list[str],
+    ) -> set[str]:
+        """Найти все занятые логины одним запуском zmprov.
+
+        searchAccounts выполняет один LDAP-запрос по всем первичным адресам
+        и алиасам. Это заменяет до N*D отдельных запусков `zmprov -l ga`.
+        """
+        address_to_login: dict[str, str] = {}
+        clauses: list[str] = []
+
+        for login in logins:
+            for domain in self.settings.zimbra_domains:
+                email = f"{login}@{domain}".lower()
+                address_to_login[email] = login
+                escaped = self._escape_ldap_filter_value(email)
+                clauses.extend(
+                    [
+                        f"(mail={escaped})",
+                        f"(zimbraMailAlias={escaped})",
+                        f"(zimbraMailDeliveryAddress={escaped})",
+                    ]
+                )
+
+        if not clauses:
+            return set()
+
+        ldap_query = f"(|{''.join(clauses)})"
+        # Число найденных объектов не может быть больше числа проверяемых
+        # адресов, но небольшой запас полезен при нескольких совпадениях.
+        limit = max(20, min(len(address_to_login) * 2, 500))
+        output = self._execute_zmprov_lookup(
+            client,
+            ["sa", "-v", ldap_query, str(limit)],
+        )
+
+        existing: set[str] = set()
+        interesting_attributes = {
+            "mail",
+            "zimbramailalias",
+            "zimbramaildeliveryaddress",
+            "name",
+        }
+
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            value = ""
+            lower_line = line.lower()
+            if lower_line.startswith("# name "):
+                value = line[7:].strip()
+            elif ":" in line:
+                attribute, candidate_value = line.split(":", 1)
+                if attribute.strip().lower() in interesting_attributes:
+                    value = candidate_value.strip()
+
+            normalized_value = value.lower()
+            login = address_to_login.get(normalized_value)
+            if login:
+                existing.add(login)
+
+        return existing
+
+    def _fallback_existing_logins(
+        self,
+        client: paramiko.SSHClient,
+        logins: list[str],
+    ) -> set[str]:
+        """Совместимый запасной способ для старых сборок Zimbra."""
+        existing: set[str] = set()
+        for login in logins:
+            for domain in self.settings.zimbra_domains:
+                email = f"{login}@{domain}"
+                try:
+                    self._execute_zmprov_lookup(client, ["ga", email, "zimbraId"])
+                    existing.add(login)
+                    break
+                except RuntimeError as exc:
+                    if self._is_not_found_error(exc):
+                        continue
+                    raise
+        return existing
+
     def address_exists(self, email: str) -> bool:
         if not self.settings.zimbra_check_enabled:
             return False
@@ -181,28 +323,62 @@ class ZimbraService:
         if self.settings.zimbra_backend == "disabled":
             raise RuntimeError("Zimbra backend отключен")
 
-        normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
+        normalized = list(
+            dict.fromkeys(
+                login.strip().lower()
+                for login in logins
+                if login.strip()
+            )
+        )
         if not normalized:
             return set()
 
         existing: set[str] = set()
-        # Все кандидаты и домены проверяются в рамках одной SSH-сессии.
-        client = self._client()
-        try:
-            for login in normalized:
-                for domain in self.settings.zimbra_domains:
-                    email = f"{login}@{domain}"
-                    try:
-                        self._execute_zmprov_lookup(client, ["ga", email, "zimbraId"])
-                        existing.add(login)
-                        break
-                    except RuntimeError as exc:
-                        if self._is_not_found_error(exc):
-                            continue
-                        raise
+        missing: list[str] = []
+
+        for login in normalized:
+            cached = self._cache_get(login)
+            if cached is None:
+                missing.append(login)
+            elif cached:
+                existing.add(login)
+
+        if not missing:
             return existing
-        finally:
-            client.close()
+
+        # Одновременно пришедшие запросы (список кандидатов и выбранный
+        # логин) не должны параллельно запускать одинаковые zmprov-команды.
+        with self._query_lock:
+            still_missing: list[str] = []
+            for login in missing:
+                cached = self._cache_get(login)
+                if cached is None:
+                    still_missing.append(login)
+                elif cached:
+                    existing.add(login)
+
+            if not still_missing:
+                return existing
+
+            client = self._client()
+            try:
+                try:
+                    found = self._search_existing_logins(client, still_missing)
+                except RuntimeError:
+                    # Старые или измененные сборки Zimbra могут не принимать
+                    # searchAccounts в ожидаемом виде. В этом случае сохраняем
+                    # прежний надежный способ проверки.
+                    found = self._fallback_existing_logins(client, still_missing)
+            finally:
+                client.close()
+
+            for login in still_missing:
+                is_existing = login in found
+                self._cache_set(login, is_existing)
+                if is_existing:
+                    existing.add(login)
+
+        return existing
 
     def login_exists_any_domain(self, login: str) -> bool:
         normalized = login.strip().lower()
@@ -217,32 +393,58 @@ class ZimbraService:
         first_name: str,
         middle_name: str,
     ) -> ZimbraCreateResult:
-        primary_domain = self.settings.zimbra_primary_domain if self.settings.zimbra_domain_mode == "primary_alias" else domain
+        primary_domain = (
+            self.settings.zimbra_primary_domain
+            if self.settings.zimbra_domain_mode == "primary_alias"
+            else domain
+        )
         primary_email = f"{login}@{primary_domain}"
-        display_name = " ".join(part for part in [last_name, first_name, middle_name] if part)
+        display_name = " ".join(
+            part for part in [last_name, first_name, middle_name] if part
+        )
 
         args = [
-            "ca", primary_email, password,
-            "displayName", display_name,
-            "givenName", first_name,
-            "sn", last_name,
+            "ca",
+            primary_email,
+            password,
+            "displayName",
+            display_name,
+            "givenName",
+            first_name,
+            "sn",
+            last_name,
         ]
         if self.settings.zimbra_cos_id:
             args.extend(["zimbraCOSId", self.settings.zimbra_cos_id])
         self._run_zmprov(args)
 
         aliases: list[str] = []
-        if self.settings.zimbra_domain_mode == "primary_alias" and self.settings.zimbra_create_aliases:
+        if (
+            self.settings.zimbra_domain_mode == "primary_alias"
+            and self.settings.zimbra_create_aliases
+        ):
             for alias_domain in self.settings.zimbra_domains:
                 alias = f"{login}@{alias_domain}"
                 if alias.lower() == primary_email.lower():
                     continue
                 self._run_zmprov(["aaa", primary_email, alias])
                 aliases.append(alias)
-        return ZimbraCreateResult(primary_email=primary_email, aliases=tuple(aliases))
+
+        if not self.settings.dry_run:
+            self._cache_set(login, True)
+
+        return ZimbraCreateResult(
+            primary_email=primary_email,
+            aliases=tuple(aliases),
+        )
 
     def delete_account(self, email: str) -> None:
         self._run_zmprov(["da", email])
+        login = email.split("@", 1)[0].strip().lower()
+        if login:
+            self._cache_remove(login)
 
     def set_dismissal_note(self, email: str, dismissal_date: date) -> None:
-        self._run_zmprov(["ma", email, "zimbraNotes", dismissal_date.strftime("%d.%m.%Y")])
+        self._run_zmprov(
+            ["ma", email, "zimbraNotes", dismissal_date.strftime("%d.%m.%Y")]
+        )
