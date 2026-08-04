@@ -30,8 +30,20 @@ class ADDirectoryUser:
 
 
 class ActiveDirectoryService:
+    UAC_ACCOUNTDISABLE = 0x0002
+    UAC_NORMAL_ACCOUNT = 0x0200
+    UAC_DONT_EXPIRE_PASSWORD = 0x10000
+
     def __init__(self, settings: Settings):
         self.settings = settings
+
+    def _user_account_control(self, *, disabled: bool) -> int:
+        value = self.UAC_NORMAL_ACCOUNT
+        if disabled:
+            value |= self.UAC_ACCOUNTDISABLE
+        if self.settings.ad_password_never_expires:
+            value |= self.UAC_DONT_EXPIRE_PASSWORD
+        return value
 
     def _server(self) -> Server:
         tls = None
@@ -265,7 +277,7 @@ class ActiveDirectoryService:
             "sAMAccountName": login,
             "userPrincipalName": upn,
             "mail": corporate_email,
-            "userAccountControl": 514,  # normal account + disabled
+            "userAccountControl": self._user_account_control(disabled=True),
         }
         with self._service_connection() as conn:
             if not conn.add(dn, attributes=attributes):
@@ -281,7 +293,13 @@ class ActiveDirectoryService:
                 # Не оставляем объект без рабочего пароля.
                 conn.delete(dn)
                 raise RuntimeError(f"AD не принял ни один сгенерированный пароль: {last_password_error}")
-            if self.settings.ad_force_change_at_first_logon:
+            # Параметры «Срок действия пароля не ограничен» и
+            # «Требовать смену пароля при следующем входе» взаимоисключающие.
+            # Для проекта приоритет имеет бессрочный пароль.
+            if (
+                self.settings.ad_force_change_at_first_logon
+                and not self.settings.ad_password_never_expires
+            ):
                 if not conn.modify(dn, {"pwdLastSet": [(MODIFY_REPLACE, [0])]}):
                     raise RuntimeError(f"AD не установил смену пароля при первом входе: {conn.result}")
             for group_dn in self.settings.ad_default_group_dns:
@@ -293,7 +311,11 @@ class ActiveDirectoryService:
         if self.settings.dry_run:
             return
         with self._service_connection() as conn:
-            if not conn.modify(dn, {"userAccountControl": [(MODIFY_REPLACE, [512])]}):
+            user_account_control = self._user_account_control(disabled=False)
+            if not conn.modify(
+                dn,
+                {"userAccountControl": [(MODIFY_REPLACE, [user_account_control])]},
+            ):
                 raise RuntimeError(f"AD не включил пользователя: {conn.result.get('message') or conn.result}")
 
     def delete_user(self, dn: str) -> None:

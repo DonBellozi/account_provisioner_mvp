@@ -36,7 +36,8 @@ services:
       AD_BIND_DN: "${AD_BIND_DN:-}"
       AD_BIND_PASSWORD: "${AD_BIND_PASSWORD:-}"
       AD_UPN_SUFFIX: "${AD_UPN_SUFFIX:-}"
-      AD_FORCE_CHANGE_AT_FIRST_LOGON: "${AD_FORCE_CHANGE_AT_FIRST_LOGON:-true}"
+      AD_FORCE_CHANGE_AT_FIRST_LOGON: "${AD_FORCE_CHANGE_AT_FIRST_LOGON:-false}"
+      AD_PASSWORD_NEVER_EXPIRES: "${AD_PASSWORD_NEVER_EXPIRES:-true}"
       AD_DEFAULT_GROUP_DNS: "${AD_DEFAULT_GROUP_DNS:-}"
 
       ZIMBRA_CHECK_ENABLED: "${ZIMBRA_CHECK_ENABLED:-false}"
@@ -76,7 +77,6 @@ services:
     volumes:
       - account-provisioner-data:/app/data
       - /opt/account-provisioner/certs:/app/certs:ro
-      - /opt/account-provisioner/ssh/known_hosts:/app/known_hosts:ro
 
     ports:
       - "${APP_PORT:-8081}:8000"

@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     ad_bind_dn: str = ""
     ad_bind_password: str = ""
     ad_upn_suffix: str = ""
-    ad_force_change_at_first_logon: bool = True
+    ad_force_change_at_first_logon: bool = False
+    ad_password_never_expires: bool = True
     ad_default_group_dns: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     zimbra_check_enabled: bool = False
