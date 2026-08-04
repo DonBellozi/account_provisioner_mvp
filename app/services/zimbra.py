@@ -88,6 +88,30 @@ class ZimbraService:
             return "/opt/zimbra/bin/zmprov"
         return "sudo -n -u zimbra /opt/zimbra/bin/zmprov"
 
+    def _execute_zmprov(
+        self,
+        client: paramiko.SSHClient,
+        args: list[str],
+        allow_not_found: bool = False,
+    ) -> str:
+        stdin, stdout, stderr = client.exec_command(self._zmprov_command(), timeout=30)
+        # Передаем команду через stdin, чтобы пароль создаваемого ящика
+        # не попадал в аргументы удаленного процесса и список процессов.
+        stdin.write(shlex.join(args) + "\n")
+        stdin.channel.shutdown_write()
+
+        code = stdout.channel.recv_exit_status()
+        out = stdout.read().decode("utf-8", errors="replace").strip()
+        err = stderr.read().decode("utf-8", errors="replace").strip()
+        combined = f"{err}\n{out}"
+
+        if code != 0 and not (
+            allow_not_found
+            and ("NO_SUCH_ACCOUNT" in combined or "account.NO_SUCH_ACCOUNT" in combined)
+        ):
+            raise RuntimeError(f"zmprov завершился с кодом {code}: {err or out}")
+        return out
+
     def _run_zmprov(
         self,
         args: list[str],
@@ -99,22 +123,16 @@ class ZimbraService:
         if mutating and self.settings.dry_run:
             return "DRY-RUN"
 
-        command = self._zmprov_command()
         client = self._client()
         try:
-            stdin, stdout, stderr = client.exec_command(command, timeout=30)
-            # Передаем команду через stdin, чтобы пароль не попадал в аргументы
-            # удаленного процесса и не был виден в списке процессов.
-            stdin.write(shlex.join(args) + "\n")
-            stdin.channel.shutdown_write()
-            code = stdout.channel.recv_exit_status()
-            out = stdout.read().decode("utf-8", errors="replace").strip()
-            err = stderr.read().decode("utf-8", errors="replace").strip()
-            if code != 0 and not (allow_not_found and "NO_SUCH_ACCOUNT" in err):
-                raise RuntimeError(f"zmprov завершился с кодом {code}: {err or out}")
-            return out
+            return self._execute_zmprov(client, args, allow_not_found=allow_not_found)
         finally:
             client.close()
+
+    @staticmethod
+    def _is_not_found_error(exc: RuntimeError) -> bool:
+        message = str(exc)
+        return "NO_SUCH_ACCOUNT" in message or "account.NO_SUCH_ACCOUNT" in message
 
     def address_exists(self, email: str) -> bool:
         if not self.settings.zimbra_check_enabled:
@@ -123,12 +141,32 @@ class ZimbraService:
             self._run_zmprov(["ga", email, "zimbraId"], mutating=False)
             return True
         except RuntimeError as exc:
-            if "NO_SUCH_ACCOUNT" in str(exc) or "account.NO_SUCH_ACCOUNT" in str(exc):
+            if self._is_not_found_error(exc):
                 return False
             raise
 
     def login_exists_any_domain(self, login: str) -> bool:
-        return any(self.address_exists(f"{login}@{domain}") for domain in self.settings.zimbra_domains)
+        if not self.settings.zimbra_check_enabled:
+            return False
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+
+        # Для всех доменов одного логина используем одно SSH-подключение.
+        # Раньше для каждого домена выполнялась отдельная SSH-аутентификация.
+        client = self._client()
+        try:
+            for domain in self.settings.zimbra_domains:
+                email = f"{login}@{domain}"
+                try:
+                    self._execute_zmprov(client, ["ga", email, "zimbraId"])
+                    return True
+                except RuntimeError as exc:
+                    if self._is_not_found_error(exc):
+                        continue
+                    raise
+            return False
+        finally:
+            client.close()
 
     def create_account(
         self,

@@ -51,8 +51,18 @@ class ProvisioningService:
         self.mailer = CredentialMailer(settings)
 
     def check_login(self, login: str) -> dict[str, bool]:
+        # AD проверяется первым. Если логин уже занят в AD, дорогостоящая
+        # SSH-проверка Zimbra для этого кандидата не нужна: кандидат в любом
+        # случае не может быть выбран.
+        ad_exists = self.ad.login_exists(login)
+        if ad_exists:
+            return {
+                "ad": True,
+                "zimbra": False,
+            }
+
         return {
-            "ad": self.ad.login_exists(login),
+            "ad": False,
             "zimbra": self.zimbra.login_exists_any_domain(login),
         }
 
