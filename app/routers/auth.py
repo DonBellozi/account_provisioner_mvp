@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -19,6 +21,7 @@ from app.services.ad import ActiveDirectoryService
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+logger = logging.getLogger(__name__)
 
 
 @router.get("/login")
@@ -54,21 +57,33 @@ def login(
     if settings.auth_mode in {"local", "hybrid"}:
         current = authenticate_local(db, normalized_username, password)
 
-    if (
-        current is None
-        and settings.auth_mode in {"ad", "hybrid"}
-        and settings.ad_login_enabled
-    ):
-        access = get_domain_access(db, normalized_username)
-        if access is not None and ActiveDirectoryService(settings).authenticate_operator(
-            normalized_username,
-            password,
-        ):
-            current = CurrentUser(
-                username=access.username,
-                role=access.role.value,
-                source="ad",
+    if current is None and settings.auth_mode in {"ad", "hybrid"}:
+        if not settings.ad_login_enabled:
+            logger.warning(
+                "Вход AD отклонен для %s: AD_LOGIN_ENABLED=false",
+                normalized_username,
             )
+        else:
+            access = get_domain_access(db, normalized_username)
+            if access is None:
+                logger.warning(
+                    "Вход AD отклонен для %s: активный доступ в админке не назначен",
+                    normalized_username,
+                )
+            elif ActiveDirectoryService(settings).authenticate_operator(
+                normalized_username,
+                password,
+            ):
+                current = CurrentUser(
+                    username=access.username,
+                    role=access.role.value,
+                    source="ad",
+                )
+            else:
+                logger.warning(
+                    "Вход AD отклонен для %s: AD не подтвердил пароль или учетная запись отключена",
+                    normalized_username,
+                )
 
     if current is None:
         return templates.TemplateResponse(

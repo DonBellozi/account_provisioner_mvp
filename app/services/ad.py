@@ -61,35 +61,55 @@ class ActiveDirectoryService:
         return conn
 
     def authenticate_operator(self, username: str, password: str) -> bool:
-        if not self.settings.ad_login_enabled:
+        """Проверить пароль доменного пользователя.
+
+        Авторизация в приложении определяется таблицей domain_access_users.
+        Здесь выполняется только проверка пароля и состояния учетной записи AD.
+
+        Основной способ – SIMPLE bind по точному distinguishedName пользователя
+        через LDAPS. Он не зависит от корректности NetBIOS-имени в AD_DOMAIN.
+        NTLM оставлен запасным способом для совместимости.
+        """
+        if not self.settings.ad_login_enabled or not password:
             return False
-        bind_user = f"{self.settings.ad_domain}\\{username}" if self.settings.ad_domain else username
-        try:
-            conn = Connection(
-                self._server(),
-                user=bind_user,
-                password=password,
-                authentication=NTLM if self.settings.ad_domain else SIMPLE,
-                auto_bind=True,
-                receive_timeout=15,
+
+        directory_user = self.get_user(username)
+        if directory_user is None or not directory_user.is_enabled:
+            return False
+
+        attempts: list[tuple[str, str]] = [
+            (SIMPLE, directory_user.distinguished_name),
+        ]
+
+        if self.settings.ad_domain:
+            attempts.append(
+                (NTLM, f"{self.settings.ad_domain}\\{directory_user.username}")
             )
+
+        if self.settings.ad_upn_suffix:
+            attempts.append(
+                (SIMPLE, f"{directory_user.username}@{self.settings.ad_upn_suffix}")
+            )
+
+        for authentication, bind_user in attempts:
+            conn = None
             try:
-                if self.settings.ad_allowed_group_dn:
-                    safe_user = escape_filter_chars(username)
-                    conn.search(
-                        self.settings.ad_base_dn,
-                        f"(&(objectClass=user)(sAMAccountName={safe_user}))",
-                        attributes=["memberOf"],
-                    )
-                    if not conn.entries:
-                        return False
-                    groups = {str(item).lower() for item in conn.entries[0].memberOf.values}
-                    return self.settings.ad_allowed_group_dn.lower() in groups
+                conn = Connection(
+                    self._server(),
+                    user=bind_user,
+                    password=password,
+                    authentication=authentication,
+                    auto_bind=True,
+                    receive_timeout=15,
+                )
                 return True
+            except LDAPException:
+                continue
             finally:
-                conn.unbind()
-        except LDAPException:
-            return False
+                if conn is not None:
+                    conn.unbind()
+
+        return False
 
     @staticmethod
     def _entry_value(entry, attribute: str, default=""):
