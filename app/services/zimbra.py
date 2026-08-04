@@ -322,7 +322,12 @@ class ZimbraService:
                 return False
             raise
 
-    def logins_exist_any_domain(self, logins: list[str]) -> set[str]:
+    def logins_exist_any_domain(
+        self,
+        logins: list[str],
+        *,
+        force_refresh: bool = False,
+    ) -> set[str]:
         if not self.settings.zimbra_check_enabled:
             return set()
         if self.settings.zimbra_backend == "disabled":
@@ -341,12 +346,18 @@ class ZimbraService:
         existing: set[str] = set()
         missing: list[str] = []
 
-        for login in normalized:
-            cached = self._cache_get(login)
-            if cached is None:
-                missing.append(login)
-            elif cached:
-                existing.add(login)
+        if force_refresh:
+            # Явная кнопка «Проверить снова» и итоговая проверка перед
+            # созданием должны видеть внешние удаления немедленно, не ожидая
+            # окончания короткого кэша Zimbra.
+            missing = list(normalized)
+        else:
+            for login in normalized:
+                cached = self._cache_get(login)
+                if cached is None:
+                    missing.append(login)
+                elif cached:
+                    existing.add(login)
 
         if not missing:
             return existing
@@ -355,12 +366,15 @@ class ZimbraService:
         # логин) не должны параллельно запускать одинаковые zmprov-команды.
         with self._query_lock:
             still_missing: list[str] = []
-            for login in missing:
-                cached = self._cache_get(login)
-                if cached is None:
-                    still_missing.append(login)
-                elif cached:
-                    existing.add(login)
+            if force_refresh:
+                still_missing = list(missing)
+            else:
+                for login in missing:
+                    cached = self._cache_get(login)
+                    if cached is None:
+                        still_missing.append(login)
+                    elif cached:
+                        existing.add(login)
 
             if not still_missing:
                 return existing
@@ -385,9 +399,17 @@ class ZimbraService:
 
         return existing
 
-    def login_exists_any_domain(self, login: str) -> bool:
+    def login_exists_any_domain(
+        self,
+        login: str,
+        *,
+        force_refresh: bool = False,
+    ) -> bool:
         normalized = login.strip().lower()
-        return normalized in self.logins_exist_any_domain([normalized])
+        return normalized in self.logins_exist_any_domain(
+            [normalized],
+            force_refresh=force_refresh,
+        )
 
     def create_account(
         self,

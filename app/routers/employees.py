@@ -131,6 +131,7 @@ def check_login_source(
     source: str,
     request: Request,
     login: str,
+    fresh: bool = False,
     settings: Settings = Depends(get_settings),
 ):
     # Запрос доступен только авторизованному оператору.
@@ -160,7 +161,10 @@ def check_login_source(
         elif source == "zimbra":
             enabled = settings.zimbra_check_enabled
             occupied = (
-                ZimbraService(settings).login_exists_any_domain(normalized_login)
+                ZimbraService(settings).login_exists_any_domain(
+                    normalized_login,
+                    force_refresh=fresh,
+                )
                 if enabled
                 else False
             )
@@ -203,6 +207,7 @@ def check_login_candidates(
     request: Request,
     logins_json: str = Form(...),
     csrf: str = Form(...),
+    force_refresh: bool = Form(False),
     settings: Settings = Depends(get_settings),
 ):
     validate_csrf(request, csrf)
@@ -225,7 +230,10 @@ def check_login_candidates(
             raise ValueError("Не переданы корректные варианты логина")
 
         started = time.perf_counter()
-        items = ProvisioningService(settings).check_logins(logins)
+        items = ProvisioningService(settings).check_logins(
+            logins,
+            force_refresh=force_refresh,
+        )
         return {
             "ok": True,
             "items": items,

@@ -50,30 +50,42 @@ class ProvisioningService:
         self.zimbra = ZimbraService(settings)
         self.mailer = CredentialMailer(settings)
 
-    def check_login(self, login: str) -> dict[str, bool]:
-        # AD проверяется первым. Если логин уже занят в AD, дорогостоящая
-        # SSH-проверка Zimbra для этого кандидата не нужна: кандидат в любом
-        # случае не может быть выбран.
+    def check_login(
+        self,
+        login: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, bool]:
+        # Проверяем оба источника, чтобы оператор видел точную причину
+        # занятости логина, даже если он существует одновременно в AD и Zimbra.
         ad_exists = self.ad.login_exists(login)
-        if ad_exists:
-            return {
-                "ad": True,
-                "zimbra": False,
-            }
-
+        zimbra_exists = self.zimbra.login_exists_any_domain(
+            login,
+            force_refresh=force_refresh,
+        )
         return {
-            "ad": False,
-            "zimbra": self.zimbra.login_exists_any_domain(login),
+            "ad": ad_exists,
+            "zimbra": zimbra_exists,
         }
 
-    def check_logins(self, logins: list[str]) -> list[dict[str, object]]:
+    def check_logins(
+        self,
+        logins: list[str],
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, object]]:
         normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
         if not normalized:
             return []
 
         ad_existing = self.ad.logins_exist(normalized)
-        zimbra_candidates = [login for login in normalized if login not in ad_existing]
-        zimbra_existing = self.zimbra.logins_exist_any_domain(zimbra_candidates)
+        # После перехода на одну пакетную zmprov-проверку нет необходимости
+        # пропускать кандидатов, занятых в AD. Проверка всех логинов дает
+        # оператору полный список источников занятости.
+        zimbra_existing = self.zimbra.logins_exist_any_domain(
+            normalized,
+            force_refresh=force_refresh,
+        )
 
         return [
             {
@@ -86,7 +98,9 @@ class ProvisioningService:
         ]
 
     def provision(self, db: Session, operator: str, data: ProvisioningInput) -> ProvisioningCredentials:
-        availability = self.check_login(data.login)
+        # Непосредственно перед созданием не доверяем кратковременному
+        # кэшу Zimbra: итоговая проверка всегда выполняется заново.
+        availability = self.check_login(data.login, force_refresh=True)
         if availability["ad"] or availability["zimbra"]:
             occupied = ", ".join(name for name, value in availability.items() if value)
             raise RuntimeError(f"Логин уже занят: {occupied}")

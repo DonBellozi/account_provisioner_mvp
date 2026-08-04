@@ -65,6 +65,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
       </div>
 
       <div class="login-domain-actions">
+        <div class="preferred-login-note" id="preferred-login-note" hidden></div>
         <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
       </div>
 
@@ -139,10 +140,12 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
 <script>
 const LOGIN_PATTERN = /^[a-z][a-z0-9.-]{0,19}$/;
 const candidateLogins = {{ candidates|tojson }};
+const preferredLogin = candidateLogins[0] || '';
 const provisionForm = document.getElementById('provision-form');
 const provisionButton = document.getElementById('provision-button');
 const loginInput = document.getElementById('login');
 const checkButton = document.getElementById('check-login-button');
+const preferredLoginNote = document.getElementById('preferred-login-note');
 const csrfToken = provisionForm.querySelector('input[name="csrf"]').value;
 
 let checkSequence = 0;
@@ -162,6 +165,41 @@ let sourceResults = {
 
 function valueOf(id) {
   return (document.getElementById(id)?.value || '').trim();
+}
+
+function occupiedSourceNames(item) {
+  const sources = [];
+  if (item?.ad) {
+    sources.push('Active Directory');
+  }
+  if (item?.zimbra) {
+    sources.push('Zimbra');
+  }
+  return sources;
+}
+
+function updatePreferredLoginNote() {
+  if (!preferredLoginNote || !preferredLogin) {
+    return;
+  }
+
+  const item = candidateResultMap.get(preferredLogin);
+  if (!item || item.free) {
+    preferredLoginNote.hidden = true;
+    preferredLoginNote.textContent = '';
+    return;
+  }
+
+  const sources = occupiedSourceNames(item);
+  const sourceText = sources.length ? sources.join(' и ') : 'одной из внешних систем';
+  const currentLogin = valueOf('login').toLowerCase();
+  const suffix = currentLogin && currentLogin !== preferredLogin
+    ? ` Выбран следующий свободный вариант «${currentLogin}».`
+    : ' Выберите свободный вариант ниже или введите собственный логин.';
+
+  preferredLoginNote.hidden = false;
+  preferredLoginNote.textContent =
+    `Стандартный логин «${preferredLogin}» занят в ${sourceText}.${suffix}`;
 }
 
 function selectLogin(login, automatic = false) {
@@ -296,13 +334,14 @@ function resetForInvalidLogin() {
   setSummary('warning', 'Логин должен начинаться с латинской буквы и содержать не более 20 символов.');
 }
 
-async function checkSource(source, login, sequence) {
+async function checkSource(source, login, sequence, forceRefresh = false) {
   const controller = new AbortController();
   activeControllers.push(controller);
 
   try {
+    const freshParameter = forceRefresh ? '&fresh=true' : '';
     const response = await fetch(
-      `/employees/check-login/${source}?login=${encodeURIComponent(login)}`,
+      `/employees/check-login/${source}?login=${encodeURIComponent(login)}${freshParameter}`,
       {
         method: 'GET',
         headers: {'Accept': 'application/json'},
@@ -387,7 +426,7 @@ function updateOverallResult(login, sequence) {
   setSummary('free', `Логин «${login}» свободен и может быть зарегистрирован.`);
 }
 
-async function runLoginCheck() {
+async function runLoginCheck(forceRefresh = false) {
   clearTimeout(debounceTimer);
   const login = valueOf('login').toLowerCase();
   loginInput.value = login;
@@ -410,7 +449,7 @@ async function runLoginCheck() {
   setSummary('checking', `Проверяется логин «${login}»...`);
 
   const checks = ['ad', 'zimbra'].map(async source => {
-    const result = await checkSource(source, login, sequence);
+    const result = await checkSource(source, login, sequence, forceRefresh);
     if (sequence !== checkSequence || result === null) {
       return;
     }
@@ -530,6 +569,7 @@ function refreshCandidatePoolVisible() {
 
   summary.append(freeBadge, document.createTextNode(' '), occupiedBadge);
   updateSuggestionSelection();
+  updatePreferredLoginNote();
 }
 
 function renderCandidatePool(items) {
@@ -540,6 +580,16 @@ function renderCandidatePool(items) {
   const freeItems = items.filter(item => item.free);
   const currentLogin = valueOf('login').toLowerCase();
   const currentResult = candidateResultMap.get(currentLogin);
+  const preferredResult = candidateResultMap.get(preferredLogin);
+
+  if (
+    !operatorChangedLogin
+    && preferredResult?.free
+    && currentLogin !== preferredLogin
+  ) {
+    selectLogin(preferredLogin, true);
+    return;
+  }
 
   if (!operatorChangedLogin && currentResult && !currentResult.free && freeItems.length > 0) {
     selectLogin(freeItems[0].login, true);
@@ -553,7 +603,7 @@ function renderCandidatePool(items) {
   }
 }
 
-async function checkCandidatePool() {
+async function checkCandidatePool(forceRefresh = false) {
   if (!candidateLogins.length) {
     setCandidatePoolReady(true);
     return;
@@ -569,6 +619,7 @@ async function checkCandidatePool() {
   const body = new URLSearchParams();
   body.set('csrf', csrfToken);
   body.set('logins_json', JSON.stringify(candidateLogins));
+  body.set('force_refresh', forceRefresh ? 'true' : 'false');
 
   try {
     const response = await fetch('/employees/check-candidates', {
@@ -616,16 +667,25 @@ async function checkCandidatePool() {
 
 loginInput.addEventListener('input', scheduleLoginCheck);
 checkButton.addEventListener('click', async () => {
-  if (!candidateLogins.length) {
-    runLoginCheck();
-    return;
-  }
+  const originalText = checkButton.textContent;
+  checkButton.disabled = true;
+  checkButton.textContent = 'Проверяю...';
 
-  await checkCandidatePool();
+  try {
+    if (!candidateLogins.length) {
+      await runLoginCheck(true);
+      return;
+    }
 
-  const currentLogin = valueOf('login').toLowerCase();
-  if (!candidateResultMap.has(currentLogin)) {
-    runLoginCheck();
+    await checkCandidatePool(true);
+
+    const currentLogin = valueOf('login').toLowerCase();
+    if (!candidateResultMap.has(currentLogin)) {
+      await runLoginCheck(true);
+    }
+  } finally {
+    checkButton.disabled = false;
+    checkButton.textContent = originalText;
   }
 });
 
