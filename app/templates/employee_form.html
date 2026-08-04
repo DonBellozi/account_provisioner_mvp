@@ -141,6 +141,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
 const LOGIN_PATTERN = /^[a-z][a-z0-9.-]{0,19}$/;
 const candidateLogins = {{ candidates|tojson }};
 const preferredLogin = candidateLogins[0] || '';
+const alternativeLogins = candidateLogins.slice(1);
 const provisionForm = document.getElementById('provision-form');
 const provisionButton = document.getElementById('provision-button');
 const loginInput = document.getElementById('login');
@@ -154,7 +155,7 @@ let activeControllers = [];
 let candidatePoolController = null;
 let lastCheckedLogin = '';
 let loginCheckReady = false;
-let candidatePoolReady = candidateLogins.length === 0;
+let candidatePoolReady = alternativeLogins.length === 0;
 let operatorChangedLogin = false;
 const candidateResultMap = new Map();
 let latestCandidateItems = [];
@@ -262,13 +263,11 @@ function setSummary(state, text) {
 }
 
 function updateProvisionButtonState() {
-  const enabled = loginCheckReady && candidatePoolReady;
+  const enabled = loginCheckReady;
   provisionButton.disabled = !enabled;
 
   if (enabled) {
     provisionButton.title = '';
-  } else if (!candidatePoolReady) {
-    provisionButton.title = 'Дождитесь проверки всех стандартных вариантов логина';
   } else {
     provisionButton.title = 'Дождитесь успешной проверки выбранного логина';
   }
@@ -413,6 +412,15 @@ function updateOverallResult(login, sequence) {
 
   lastCheckedLogin = login;
 
+  const currentItem = {
+    login,
+    ad: Boolean(sourceResults.ad.occupied),
+    zimbra: Boolean(sourceResults.zimbra.occupied),
+    free: occupiedLabels.length === 0,
+  };
+  candidateResultMap.set(login, currentItem);
+  updatePreferredLoginNote();
+
   if (occupiedLabels.length > 0) {
     setProvisionEnabled(false);
     setSummary(
@@ -486,7 +494,7 @@ function renderCandidatePoolChecking() {
   }
 
   const currentLogin = valueOf('login').toLowerCase();
-  const visibleLogins = candidateLogins
+  const visibleLogins = alternativeLogins
     .filter(login => login !== currentLogin)
     .slice(0, 6);
 
@@ -508,7 +516,10 @@ function renderCandidatePoolChecking() {
   });
 
   summary.className = 'candidate-pool-summary checking';
-  summary.replaceChildren(makeSpinner(), document.createTextNode('Проверяются варианты'));
+  summary.replaceChildren(
+    makeSpinner(),
+    document.createTextNode('Проверяются альтернативные варианты'),
+  );
 }
 
 function refreshCandidatePoolVisible() {
@@ -574,30 +585,25 @@ function refreshCandidatePoolVisible() {
 }
 
 function renderCandidatePool(items) {
-  candidateResultMap.clear();
+  alternativeLogins.forEach(login => candidateResultMap.delete(login));
   items.forEach(item => candidateResultMap.set(item.login, item));
   latestCandidateItems = items;
 
-  const currentLogin = valueOf('login').toLowerCase();
-  const currentResult = candidateResultMap.get(currentLogin);
-
   // Стандартный логин остается выбранным даже при занятости.
-  // Создание блокируется до явного решения оператора: выбора свободной
-  // альтернативы, ввода собственного логина или освобождения стандартного.
+  // Фоновая проверка лишь показывает оператору свободные альтернативы
+  // и не заменяет результат основной проверки.
   refreshCandidatePoolVisible();
-
-  if (currentResult) {
-    applyCandidateResult(currentLogin);
-  }
 }
 
 async function checkCandidatePool(forceRefresh = false) {
-  if (!candidateLogins.length) {
+  if (!alternativeLogins.length) {
     setCandidatePoolReady(true);
     return;
   }
 
   setCandidatePoolReady(false);
+  alternativeLogins.forEach(login => candidateResultMap.delete(login));
+  latestCandidateItems = [];
   renderCandidatePoolChecking();
   if (candidatePoolController) {
     candidatePoolController.abort();
@@ -606,7 +612,7 @@ async function checkCandidatePool(forceRefresh = false) {
 
   const body = new URLSearchParams();
   body.set('csrf', csrfToken);
-  body.set('logins_json', JSON.stringify(candidateLogins));
+  body.set('logins_json', JSON.stringify(alternativeLogins));
   body.set('force_refresh', forceRefresh ? 'true' : 'false');
 
   try {
@@ -645,7 +651,6 @@ async function checkCandidatePool(forceRefresh = false) {
       summary.className = 'candidate-pool-summary error';
       summary.textContent = 'Ошибка фоновой проверки';
     }
-    runLoginCheck();
   }
 }
 
@@ -660,17 +665,11 @@ checkButton.addEventListener('click', async () => {
   checkButton.textContent = 'Проверяю...';
 
   try {
-    if (!candidateLogins.length) {
-      await runLoginCheck(true);
-      return;
-    }
+    // Сначала оператор сразу получает результат выбранного логина.
+    await runLoginCheck(true);
 
+    // После этого в фоне обновляются свободные альтернативы.
     await checkCandidatePool(true);
-
-    const currentLogin = valueOf('login').toLowerCase();
-    if (!candidateResultMap.has(currentLogin)) {
-      await runLoginCheck(true);
-    }
   } finally {
     checkButton.disabled = false;
     checkButton.textContent = originalText;
@@ -679,12 +678,6 @@ checkButton.addEventListener('click', async () => {
 
 provisionForm.addEventListener('submit', event => {
   const currentLogin = valueOf('login').toLowerCase();
-
-  if (!candidatePoolReady) {
-    event.preventDefault();
-    setSummary('warning', 'Сначала дождитесь полной проверки стандартных вариантов логина.');
-    return;
-  }
 
   if (!loginCheckReady || lastCheckedLogin !== currentLogin) {
     event.preventDefault();
@@ -699,11 +692,10 @@ provisionForm.addEventListener('submit', event => {
 
 updatePreview();
 updateProvisionButtonState();
-if (candidateLogins.length) {
+
+runLoginCheck().finally(() => {
   checkCandidatePool();
-} else {
-  runLoginCheck();
-}
+});
 </script>
 {% endif %}
 {% endblock %}
