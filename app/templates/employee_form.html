@@ -41,7 +41,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
 
   <section class="card">
     <h2>Логин и почтовый домен</h2>
-    <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а подходящие стандартные варианты подбираются в фоне.</p>
+    <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо. Стандартный логин остается выбранным, а свободные альтернативы показываются ниже для решения оператора.</p>
 
     <div class="login-domain-stack">
       <div class="grid two login-domain-fields">
@@ -109,7 +109,7 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
       <div class="candidate-pool-heading">
         <div>
           <h3>Доступные альтернативные варианты</h3>
-          <p class="muted">Проверяется до 12 вариантов. Текущий логин здесь не дублируется, показывается не больше 6 свободных альтернатив.</p>
+          <p class="muted">Проверяется до 12 вариантов. Система не переключает логин автоматически: оператор сам выбирает свободную альтернативу или оставляет стандартный логин для повторной проверки.</p>
         </div>
         <div class="candidate-pool-summary" id="candidate-pool-summary">
           <span class="spinner" aria-hidden="true"></span>
@@ -194,8 +194,8 @@ function updatePreferredLoginNote() {
   const sourceText = sources.length ? sources.join(' и ') : 'одной из внешних систем';
   const currentLogin = valueOf('login').toLowerCase();
   const suffix = currentLogin && currentLogin !== preferredLogin
-    ? ` Выбран следующий свободный вариант «${currentLogin}».`
-    : ' Выберите свободный вариант ниже или введите собственный логин.';
+    ? ` Выбран другой логин «${currentLogin}».`
+    : ' Выберите свободный вариант ниже, введите собственный логин или освободите стандартный логин и нажмите «Проверить снова».';
 
   preferredLoginNote.hidden = false;
   preferredLoginNote.textContent =
@@ -464,6 +464,7 @@ function scheduleLoginCheck() {
   operatorChangedLogin = true;
   updateSuggestionSelection();
   updatePreview();
+  updatePreferredLoginNote();
   setProvisionEnabled(false);
 
   clearTimeout(debounceTimer);
@@ -577,25 +578,12 @@ function renderCandidatePool(items) {
   items.forEach(item => candidateResultMap.set(item.login, item));
   latestCandidateItems = items;
 
-  const freeItems = items.filter(item => item.free);
   const currentLogin = valueOf('login').toLowerCase();
   const currentResult = candidateResultMap.get(currentLogin);
-  const preferredResult = candidateResultMap.get(preferredLogin);
 
-  if (
-    !operatorChangedLogin
-    && preferredResult?.free
-    && currentLogin !== preferredLogin
-  ) {
-    selectLogin(preferredLogin, true);
-    return;
-  }
-
-  if (!operatorChangedLogin && currentResult && !currentResult.free && freeItems.length > 0) {
-    selectLogin(freeItems[0].login, true);
-    return;
-  }
-
+  // Стандартный логин остается выбранным даже при занятости.
+  // Создание блокируется до явного решения оператора: выбора свободной
+  // альтернативы, ввода собственного логина или освобождения стандартного.
   refreshCandidatePoolVisible();
 
   if (currentResult) {
