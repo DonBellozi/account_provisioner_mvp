@@ -113,7 +113,12 @@ class ZimbraService:
         stdin, stdout, stderr = client.exec_command(self._zmprov_command(), timeout=30)
         # Изменяющие команды передаем через stdin, чтобы пароль создаваемого
         # ящика не попадал в аргументы процесса и не был виден в ps.
-        stdin.write(shlex.join(args) + "\n")
+        # Paramiko необходимо передавать готовые UTF-8 bytes.
+        # При передаче Python str кириллица в некоторых версиях превращается
+        # в младшие байты Unicode: «Тестов» -> «"5AB>2».
+        payload = (shlex.join(args) + "\n").encode("utf-8")
+        stdin.write(payload)
+        stdin.flush()
         stdin.channel.shutdown_write()
 
         code = stdout.channel.recv_exit_status()
@@ -409,11 +414,16 @@ class ZimbraService:
             password,
             "displayName",
             display_name,
+            "zimbraPrefFromDisplay",
+            display_name,
             "givenName",
             first_name,
-            "sn",
-            last_name,
         ]
+        if middle_name:
+            # В учетной записи Zimbra поле Middle Name / Отчество
+            # хранится в стандартном LDAP-атрибуте initials.
+            args.extend(["initials", middle_name])
+        args.extend(["sn", last_name])
         if self.settings.zimbra_cos_id:
             args.extend(["zimbraCOSId", self.settings.zimbra_cos_id])
         self._run_zmprov(args)
