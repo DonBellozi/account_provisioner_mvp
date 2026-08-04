@@ -58,6 +58,28 @@ class DomainAccessUser(Base):
     )
 
 
+class DomainMailProfile(Base):
+    """Почтовый отправитель и два шаблона для конкретного домена."""
+
+    __tablename__ = "domain_mail_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    sender_name: Mapped[str] = mapped_column(String(256), default="")
+    sender_email: Mapped[str] = mapped_column(String(320))
+    personal_subject: Mapped[str] = mapped_column(String(512))
+    personal_body_html: Mapped[str] = mapped_column(Text)
+    corporate_subject: Mapped[str] = mapped_column(String(512))
+    corporate_body_html: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+
 class ProvisioningOperation(Base):
     __tablename__ = "provisioning_operations"
 

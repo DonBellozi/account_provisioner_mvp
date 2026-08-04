@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import AuditLog, OperationStatus, ProvisioningOperation
 from app.services.ad import ActiveDirectoryService
-from app.services.mailer import CredentialMailer
+from app.services.mailer import CredentialMailer, get_domain_mail_profile
 from app.services.names import transliterate
 from app.services.passwords import generate_ad_password, generate_mail_password
 from app.services.zimbra import ZimbraService
@@ -92,6 +92,11 @@ class ProvisioningService:
             raise RuntimeError(f"Логин уже занят: {occupied}")
 
         full_name = " ".join(part for part in [data.last_name, data.first_name, data.middle_name] if part)
+        mail_profile = get_domain_mail_profile(
+            db,
+            self.settings,
+            data.mail_domain,
+        )
         mail_password = generate_mail_password(
             self.settings.mail_password_length,
             self.settings.mail_password_specials,
@@ -191,6 +196,7 @@ class ProvisioningService:
         if operation.zimbra_created:
             try:
                 self.mailer.send_mail_credentials(
+                    profile=mail_profile,
                     personal_email=data.personal_email,
                     full_name=full_name,
                     corporate_email=corporate_email,
@@ -204,6 +210,7 @@ class ProvisioningService:
         if operation.ad_enabled and operation.zimbra_created:
             try:
                 self.mailer.send_ad_credentials(
+                    profile=mail_profile,
                     corporate_email=corporate_email,
                     full_name=full_name,
                     ad_login=data.login,

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Шаблоны писем{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Шаблоны писем</h1>
+    <p class="muted admin-lead">
+      SMTP-подключение и логин остаются общими. Адрес и имя отправителя выбираются по почтовому домену работника.
+    </p>
+  </div>
+</div>
+
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<div class="mail-profile-grid">
+{% for profile in profiles %}
+  <section class="card mail-profile-card">
+    <div class="mail-profile-header">
+      <div>
+        <div class="mail-profile-kicker">Шаблоны для домена</div>
+        <h2>{{ profile.domain }}</h2>
+      </div>
+      <span class="mail-domain-badge">@{{ profile.domain }}</span>
+    </div>
+
+    <form method="post"
+          action="/admin/mail-templates/{{ profile.id }}"
+          class="stack mail-template-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+
+      <div class="mail-sender-grid">
+        <label>Имя отправителя
+          <input name="sender_name"
+                 value="{{ profile.sender_name }}"
+                 maxlength="256"
+                 placeholder="ИТ-служба">
+        </label>
+        <label>Email отправителя
+          <input type="email"
+                 name="sender_email"
+                 value="{{ profile.sender_email }}"
+                 maxlength="320"
+                 required
+                 placeholder="it@{{ profile.domain }}">
+        </label>
+      </div>
+
+      <div class="mail-template-box">
+        <div class="mail-template-title">
+          <div>
+            <strong>1. Реквизиты корпоративной почты</strong>
+            <div class="muted">Отправляется на личный email работника.</div>
+          </div>
+        </div>
+
+        <label>Тема письма
+          <input name="personal_subject"
+                 value="{{ profile.personal_subject }}"
+                 maxlength="512"
+                 required>
+        </label>
+
+        <label>HTML-шаблон письма
+          <textarea name="personal_body_html"
+                    rows="13"
+                    required
+                    spellcheck="false">{{ profile.personal_body_html }}</textarea>
+        </label>
+
+        <div class="template-variables">
+          <span>Доступные переменные:</span>
+          {% for variable in personal_variables %}
+            <code>{{ "{{ " }}{{ variable }}{{ " }}" }}</code>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="mail-template-box">
+        <div class="mail-template-title">
+          <div>
+            <strong>2. Реквизиты доменной учетной записи</strong>
+            <div class="muted">Отправляется на созданный корпоративный адрес.</div>
+          </div>
+        </div>
+
+        <label>Тема письма
+          <input name="corporate_subject"
+                 value="{{ profile.corporate_subject }}"
+                 maxlength="512"
+                 required>
+        </label>
+
+        <label>HTML-шаблон письма
+          <textarea name="corporate_body_html"
+                    rows="13"
+                    required
+                    spellcheck="false">{{ profile.corporate_body_html }}</textarea>
+        </label>
+
+        <div class="template-variables">
+          <span>Доступные переменные:</span>
+          {% for variable in corporate_variables %}
+            <code>{{ "{{ " }}{{ variable }}{{ " }}" }}</code>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="mail-template-actions">
+        <div class="muted">
+          {% if profile.updated_by %}
+            Последнее изменение: {{ profile.updated_by }}
+          {% else %}
+            Используются начальные шаблоны
+          {% endif %}
+        </div>
+        <button type="submit">Сохранить шаблоны для {{ profile.domain }}</button>
+      </div>
+    </form>
+  </section>
+{% else %}
+  <section class="card">
+    <div class="candidate-pool-empty">
+      В настройках Zimbra не указаны почтовые домены.
+    </div>
+  </section>
+{% endfor %}
+</div>
+
+<section class="card">
+  <h2>Как выбирается отправитель</h2>
+  <p>
+    Для работника с адресом <code>ivanov.ii@domain.ru</code> используются отправитель,
+    темы и шаблоны из раздела <code>domain.ru</code>. Для адреса
+    <code>ivanov.ii@domain.com</code> – настройки раздела <code>domain.com</code>.
+  </p>
+  <p class="muted">
+    Логин SMTP может оставаться одним. Почтовый сервер должен разрешать этой учетной записи отправку
+    от имени обоих указанных адресов.
+  </p>
+</section>
+{% endblock %}

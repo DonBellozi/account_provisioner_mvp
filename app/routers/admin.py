@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import AuditLog, DomainAccessUser, UserRole
+from app.models import AuditLog, DomainAccessUser, DomainMailProfile, UserRole
 from app.security import (
     get_or_create_csrf,
     normalize_username,
@@ -18,6 +18,12 @@ from app.security import (
     validate_csrf,
 )
 from app.services.ad import ActiveDirectoryService
+from app.services.mailer import (
+    CORPORATE_TEMPLATE_VARIABLES,
+    PERSONAL_TEMPLATE_VARIABLES,
+    ensure_domain_mail_profiles,
+    validate_mail_template,
+)
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="app/templates")
@@ -218,3 +224,121 @@ def delete_access_user(
     except Exception as exc:
         db.rollback()
         return _redirect(error=str(exc))
+
+@router.get("/mail-templates")
+def mail_templates(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    current = require_admin(request)
+    profiles = ensure_domain_mail_profiles(db, settings)
+    return templates.TemplateResponse(
+        request,
+        "admin_mail_templates.html",
+        {
+            "user": current,
+            "csrf": get_or_create_csrf(request),
+            "profiles": profiles,
+            "personal_variables": sorted(PERSONAL_TEMPLATE_VARIABLES),
+            "corporate_variables": sorted(CORPORATE_TEMPLATE_VARIABLES),
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
+    )
+
+
+@router.post("/mail-templates/{profile_id}")
+def update_mail_template(
+    profile_id: int,
+    request: Request,
+    sender_name: str = Form(""),
+    sender_email: str = Form(...),
+    personal_subject: str = Form(...),
+    personal_body_html: str = Form(...),
+    corporate_subject: str = Form(...),
+    corporate_body_html: str = Form(...),
+    csrf: str = Form(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    current = require_admin(request)
+
+    try:
+        from email_validator import EmailNotValidError, validate_email
+
+        profile = db.get(DomainMailProfile, profile_id)
+        if profile is None:
+            raise ValueError("Профиль почтового домена не найден")
+
+        configured_domains = {
+            domain.strip().lower()
+            for domain in settings.zimbra_domains
+            if domain.strip()
+        }
+        if configured_domains and profile.domain.lower() not in configured_domains:
+            raise ValueError("Этот домен отсутствует в настройках Zimbra")
+
+        try:
+            normalized_sender = validate_email(
+                sender_email.strip(),
+                check_deliverability=False,
+            ).normalized
+        except EmailNotValidError as exc:
+            raise ValueError(f"Некорректный email отправителя: {exc}") from exc
+
+        validate_mail_template(
+            personal_subject,
+            allowed_variables=PERSONAL_TEMPLATE_VARIABLES,
+            field_name="Тема письма с реквизитами почты",
+            autoescape=False,
+        )
+        validate_mail_template(
+            personal_body_html,
+            allowed_variables=PERSONAL_TEMPLATE_VARIABLES,
+            field_name="Шаблон письма с реквизитами почты",
+            autoescape=True,
+        )
+        validate_mail_template(
+            corporate_subject,
+            allowed_variables=CORPORATE_TEMPLATE_VARIABLES,
+            field_name="Тема письма с реквизитами AD",
+            autoescape=False,
+        )
+        validate_mail_template(
+            corporate_body_html,
+            allowed_variables=CORPORATE_TEMPLATE_VARIABLES,
+            field_name="Шаблон письма с реквизитами AD",
+            autoescape=True,
+        )
+
+        profile.sender_name = sender_name.strip()
+        profile.sender_email = normalized_sender
+        profile.personal_subject = personal_subject.strip()
+        profile.personal_body_html = personal_body_html.strip()
+        profile.corporate_subject = corporate_subject.strip()
+        profile.corporate_body_html = corporate_body_html.strip()
+        profile.updated_by = current.username
+
+        db.add(
+            AuditLog(
+                actor=current.username,
+                action="mail_template_update",
+                target=profile.domain,
+                result="success",
+                details=f"sender={normalized_sender}",
+            )
+        )
+        db.commit()
+        return RedirectResponse(
+            f"/admin/mail-templates?message={quote_plus(f'Шаблоны для {profile.domain} сохранены')}",
+            status_code=303,
+        )
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(
+            f"/admin/mail-templates?error={quote_plus(str(exc))}",
+            status_code=303,
+        )
+

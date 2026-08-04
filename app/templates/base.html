@@ -15,7 +15,8 @@
       <a href="/employees/new">Новый работник</a>
       <a href="/dismissals/new">Увольнение</a>
       {% if user.role == 'admin' %}
-      <a href="/admin/access">Администрирование</a>
+      <a href="/admin/access">Доступ</a>
+      <a href="/admin/mail-templates">Шаблоны писем</a>
       {% endif %}
       <form method="post" action="/logout" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}">
