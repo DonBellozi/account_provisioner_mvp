@@ -145,28 +145,38 @@ class ZimbraService:
                 return False
             raise
 
-    def login_exists_any_domain(self, login: str) -> bool:
+    def logins_exist_any_domain(self, logins: list[str]) -> set[str]:
         if not self.settings.zimbra_check_enabled:
-            return False
+            return set()
         if self.settings.zimbra_backend == "disabled":
             raise RuntimeError("Zimbra backend отключен")
 
-        # Для всех доменов одного логина используем одно SSH-подключение.
-        # Раньше для каждого домена выполнялась отдельная SSH-аутентификация.
+        normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
+        if not normalized:
+            return set()
+
+        existing: set[str] = set()
+        # Все кандидаты и домены проверяются в рамках одной SSH-сессии.
         client = self._client()
         try:
-            for domain in self.settings.zimbra_domains:
-                email = f"{login}@{domain}"
-                try:
-                    self._execute_zmprov(client, ["ga", email, "zimbraId"])
-                    return True
-                except RuntimeError as exc:
-                    if self._is_not_found_error(exc):
-                        continue
-                    raise
-            return False
+            for login in normalized:
+                for domain in self.settings.zimbra_domains:
+                    email = f"{login}@{domain}"
+                    try:
+                        self._execute_zmprov(client, ["ga", email, "zimbraId"])
+                        existing.add(login)
+                        break
+                    except RuntimeError as exc:
+                        if self._is_not_found_error(exc):
+                            continue
+                        raise
+            return existing
         finally:
             client.close()
+
+    def login_exists_any_domain(self, login: str) -> bool:
+        normalized = login.strip().lower()
+        return normalized in self.logins_exist_any_domain([normalized])
 
     def create_account(
         self,

@@ -40,34 +40,33 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
   </section>
 
   <section class="card">
-    <h2>Логин</h2>
-    <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а их состояния обновляются ниже.</p>
+    <h2>Логин и почтовый домен</h2>
+    <p>Форма уже открыта. Active Directory и Zimbra проверяются независимо, а подходящие стандартные варианты подбираются в фоне.</p>
 
-    {% if candidates %}
-    <div class="login-suggestions" aria-label="Стандартные варианты логина">
-      {% for candidate in candidates %}
-      <button type="button"
-              class="candidate-option{% if selected_login|default('') == candidate %} active{% endif %}"
-              data-login="{{ candidate }}"
-              onclick="selectLogin('{{ candidate }}')">
-        <code>{{ candidate }}</code>
-      </button>
-      {% endfor %}
-    </div>
-    <p class="muted">Можно выбрать предложенный вариант или ввести собственный логин.</p>
-    {% endif %}
+    <div class="login-domain-stack">
+      <div class="login-input-row">
+        <label>Предлагаемый или собственный логин
+          <input id="login"
+                 name="login"
+                 value="{{ selected_login|default('') }}"
+                 pattern="[a-z][a-z0-9.-]{0,19}"
+                 maxlength="20"
+                 required
+                 autocomplete="off">
+        </label>
+        <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
+      </div>
 
-    <div class="login-input-row">
-      <label>Предлагаемый или собственный логин
-        <input id="login"
-               name="login"
-               value="{{ selected_login|default('') }}"
-               pattern="[a-z][a-z0-9.-]{0,19}"
-               maxlength="20"
-               required
-               autocomplete="off">
+      <label>Почтовый домен
+        <select id="mail_domain" name="mail_domain" required onchange="updatePreview()">
+          {% for domain in domains %}
+          <option value="{{ domain }}" {% if selected_domain|default('') == domain %}selected{% endif %}>{{ domain }}</option>
+          {% endfor %}
+        </select>
       </label>
-      <button type="button" class="button secondary check-again" id="check-login-button">Проверить снова</button>
+      {% if domain_mode == 'primary_alias' %}
+        <p class="muted">Основной домен задается настройками системы. Для остальных доменов будут созданы алиасы.</p>
+      {% endif %}
     </div>
 
     <div class="login-check-panel" id="login-check-panel" aria-live="polite">
@@ -90,21 +89,23 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
       </div>
     </div>
 
-    <p class="muted">Основной порядок: <code>фамилия.ио</code>, затем <code>фамилия.и</code>, затем <code>фамилия</code>. При дальнейших совпадениях добавляются буквы имени или отчества, без порядковых номеров.</p>
-  </section>
-
-  <section class="card">
-    <h2>Почтовый домен</h2>
-    {% if domain_mode == 'primary_alias' %}
-      <p>Основной домен задается настройками системы. Для остальных доменов будут созданы алиасы.</p>
+    {% if candidates %}
+    <div class="candidate-pool">
+      <div class="candidate-pool-heading">
+        <div>
+          <h3>Доступные стандартные варианты</h3>
+          <p class="muted">Проверяется до 12 вариантов. На экране показывается не больше 6 свободных.</p>
+        </div>
+        <div class="candidate-pool-summary" id="candidate-pool-summary">
+          <span class="spinner" aria-hidden="true"></span>
+          Проверяются варианты
+        </div>
+      </div>
+      <div class="candidate-pool-list" id="candidate-pool-list" aria-live="polite"></div>
+    </div>
     {% endif %}
-    <label>Домен
-      <select id="mail_domain" name="mail_domain" required onchange="updatePreview()">
-        {% for domain in domains %}
-        <option value="{{ domain }}" {% if selected_domain|default('') == domain %}selected{% endif %}>{{ domain }}</option>
-        {% endfor %}
-      </select>
-    </label>
+
+    <p class="muted">Основной порядок: <code>фамилия.ио</code>, затем <code>фамилия.и</code>, затем <code>фамилия</code>. При дальнейших совпадениях добавляются буквы имени или отчества, без порядковых номеров.</p>
   </section>
 
   <section class="card">
@@ -124,16 +125,20 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
 
 <script>
 const LOGIN_PATTERN = /^[a-z][a-z0-9.-]{0,19}$/;
+const candidateLogins = {{ candidates|tojson }};
 const provisionForm = document.getElementById('provision-form');
 const provisionButton = document.getElementById('provision-button');
 const loginInput = document.getElementById('login');
 const checkButton = document.getElementById('check-login-button');
+const csrfToken = provisionForm.querySelector('input[name="csrf"]').value;
 
 let checkSequence = 0;
 let debounceTimer = null;
 let activeControllers = [];
+let candidatePoolController = null;
 let lastCheckedLogin = '';
 let loginCheckReady = false;
+let operatorChangedLogin = false;
 let sourceResults = {
   ad: null,
   zimbra: null,
@@ -143,7 +148,10 @@ function valueOf(id) {
   return (document.getElementById(id)?.value || '').trim();
 }
 
-function selectLogin(login) {
+function selectLogin(login, automatic = false) {
+  if (!automatic) {
+    operatorChangedLogin = true;
+  }
   loginInput.value = login;
   updateSuggestionSelection();
   updatePreview();
@@ -151,7 +159,7 @@ function selectLogin(login) {
 }
 
 function updateSuggestionSelection() {
-  const current = valueOf('login');
+  const current = valueOf('login').toLowerCase();
   document.querySelectorAll('.candidate-option').forEach(button => {
     button.classList.toggle('active', button.dataset.login === current);
   });
@@ -299,7 +307,7 @@ function updateOverallResult(login, sequence) {
     setProvisionEnabled(false);
     setSummary(
       'occupied',
-      `Логин «${login}» занят: ${occupiedLabels.join(' и ')}. Введите другой логин или выберите вариант выше.`,
+      `Логин «${login}» занят: ${occupiedLabels.join(' и ')}. Введите другой логин или выберите свободный вариант ниже.`,
     );
     return;
   }
@@ -343,12 +351,157 @@ async function runLoginCheck() {
 }
 
 function scheduleLoginCheck() {
+  operatorChangedLogin = true;
   updateSuggestionSelection();
   updatePreview();
   setProvisionEnabled(false);
 
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(runLoginCheck, 450);
+}
+
+function makeSpinner() {
+  const spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  return spinner;
+}
+
+function renderCandidatePoolChecking() {
+  const list = document.getElementById('candidate-pool-list');
+  const summary = document.getElementById('candidate-pool-summary');
+  if (!list || !summary) {
+    return;
+  }
+
+  list.replaceChildren();
+  candidateLogins.slice(0, 6).forEach(login => {
+    const row = document.createElement('div');
+    row.className = 'candidate-option checking';
+
+    const code = document.createElement('code');
+    code.textContent = login;
+
+    const status = document.createElement('span');
+    status.className = 'candidate-state checking';
+    status.appendChild(makeSpinner());
+    status.appendChild(document.createTextNode('Проверяется'));
+
+    row.append(code, status);
+    list.appendChild(row);
+  });
+
+  summary.className = 'candidate-pool-summary checking';
+  summary.replaceChildren(makeSpinner(), document.createTextNode('Проверяются варианты'));
+}
+
+function renderCandidatePool(items) {
+  const list = document.getElementById('candidate-pool-list');
+  const summary = document.getElementById('candidate-pool-summary');
+  if (!list || !summary) {
+    return;
+  }
+
+  const freeItems = items.filter(item => item.free);
+  const occupiedCount = items.length - freeItems.length;
+  list.replaceChildren();
+
+  freeItems.slice(0, 6).forEach(item => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'candidate-option free';
+    button.dataset.login = item.login;
+    button.addEventListener('click', () => selectLogin(item.login));
+
+    const code = document.createElement('code');
+    code.textContent = item.login;
+
+    const status = document.createElement('span');
+    status.className = 'candidate-state free';
+    status.textContent = 'Свободен';
+
+    button.append(code, status);
+    list.appendChild(button);
+  });
+
+  if (freeItems.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'candidate-pool-empty';
+    empty.textContent = 'Свободных стандартных вариантов не найдено. Введите собственный логин.';
+    list.appendChild(empty);
+  }
+
+  summary.className = 'candidate-pool-summary complete';
+  summary.replaceChildren();
+
+  const freeBadge = document.createElement('span');
+  freeBadge.className = 'candidate-count free';
+  freeBadge.textContent = `Свободно: ${freeItems.length}`;
+
+  const occupiedBadge = document.createElement('span');
+  occupiedBadge.className = 'candidate-count occupied';
+  occupiedBadge.textContent = `Занято: ${occupiedCount}`;
+
+  summary.append(freeBadge, occupiedBadge);
+  updateSuggestionSelection();
+
+  const currentLogin = valueOf('login').toLowerCase();
+  const currentResult = items.find(item => item.login === currentLogin);
+  if (!operatorChangedLogin && currentResult && !currentResult.free && freeItems.length > 0) {
+    selectLogin(freeItems[0].login, true);
+  }
+}
+
+async function checkCandidatePool() {
+  if (!candidateLogins.length) {
+    return;
+  }
+
+  renderCandidatePoolChecking();
+  if (candidatePoolController) {
+    candidatePoolController.abort();
+  }
+  candidatePoolController = new AbortController();
+
+  const body = new URLSearchParams();
+  body.set('csrf', csrfToken);
+  body.set('logins_json', JSON.stringify(candidateLogins));
+
+  try {
+    const response = await fetch('/employees/check-candidates', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      },
+      body,
+      cache: 'no-store',
+      signal: candidatePoolController.signal,
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `Ошибка HTTP ${response.status}`);
+    }
+    renderCandidatePool(data.items || []);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+    const list = document.getElementById('candidate-pool-list');
+    const summary = document.getElementById('candidate-pool-summary');
+    if (list) {
+      list.replaceChildren();
+      const message = document.createElement('div');
+      message.className = 'candidate-pool-empty error';
+      message.textContent = `Не удалось проверить варианты: ${error.message}`;
+      list.appendChild(message);
+    }
+    if (summary) {
+      summary.className = 'candidate-pool-summary error';
+      summary.textContent = 'Ошибка фоновой проверки';
+    }
+  }
 }
 
 ['last_name', 'first_name', 'middle_name'].forEach(id => {
@@ -373,8 +526,8 @@ provisionForm.addEventListener('submit', event => {
 });
 
 updatePreview();
-updateSuggestionSelection();
 runLoginCheck();
+checkCandidatePool();
 </script>
 {% endif %}
 {% endblock %}

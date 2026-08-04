@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import date
@@ -22,6 +23,7 @@ from app.services.zimbra import ZimbraService
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 LOGIN_RE = re.compile(r"^[a-z][a-z0-9.-]{0,19}$")
+MAX_BACKGROUND_CANDIDATES = 12
 
 
 def _context(request: Request, **kwargs):
@@ -37,7 +39,7 @@ def _domains(settings: Settings) -> list[str]:
 
 def _login_candidates(last_name: str, first_name: str, middle_name: str) -> list[str]:
     try:
-        return build_login_candidates(last_name, first_name, middle_name)
+        return build_login_candidates(last_name, first_name, middle_name)[:MAX_BACKGROUND_CANDIDATES]
     except Exception:
         return []
 
@@ -85,7 +87,7 @@ def parse_employee(
             parsed.last_name,
             parsed.first_name,
             parsed.middle_name,
-        )
+        )[:MAX_BACKGROUND_CANDIDATES]
         if not candidates:
             raise RuntimeError("Не удалось сформировать логин из ФИО")
 
@@ -191,6 +193,50 @@ def check_login_source(
                 "login": normalized_login,
                 "error": str(exc),
                 "elapsed_ms": round((time.perf_counter() - started) * 1000),
+            },
+            status_code=503,
+        )
+
+
+@router.post("/employees/check-candidates")
+def check_login_candidates(
+    request: Request,
+    logins_json: str = Form(...),
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    get_current_user(request)
+
+    try:
+        raw_logins = json.loads(logins_json)
+        if not isinstance(raw_logins, list):
+            raise ValueError("Список кандидатов имеет неверный формат")
+
+        logins: list[str] = []
+        for value in raw_logins[:MAX_BACKGROUND_CANDIDATES]:
+            login = str(value).strip().lower()
+            if not LOGIN_RE.fullmatch(login):
+                continue
+            if login not in logins:
+                logins.append(login)
+
+        if not logins:
+            raise ValueError("Не переданы корректные варианты логина")
+
+        started = time.perf_counter()
+        items = ProvisioningService(settings).check_logins(logins)
+        return {
+            "ok": True,
+            "items": items,
+            "checked": len(items),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000),
+        }
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
             },
             status_code=503,
         )

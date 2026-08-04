@@ -66,6 +66,25 @@ class ProvisioningService:
             "zimbra": self.zimbra.login_exists_any_domain(login),
         }
 
+    def check_logins(self, logins: list[str]) -> list[dict[str, object]]:
+        normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
+        if not normalized:
+            return []
+
+        ad_existing = self.ad.logins_exist(normalized)
+        zimbra_candidates = [login for login in normalized if login not in ad_existing]
+        zimbra_existing = self.zimbra.logins_exist_any_domain(zimbra_candidates)
+
+        return [
+            {
+                "login": login,
+                "ad": login in ad_existing,
+                "zimbra": login in zimbra_existing,
+                "free": login not in ad_existing and login not in zimbra_existing,
+            }
+            for login in normalized
+        ]
+
     def provision(self, db: Session, operator: str, data: ProvisioningInput) -> ProvisioningCredentials:
         availability = self.check_login(data.login)
         if availability["ad"] or availability["zimbra"]:

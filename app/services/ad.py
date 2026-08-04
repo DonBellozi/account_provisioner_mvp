@@ -82,18 +82,37 @@ class ActiveDirectoryService:
         except LDAPException:
             return False
 
-    def login_exists(self, login: str) -> bool:
+    def logins_exist(self, logins: list[str]) -> set[str]:
         if not self.settings.ad_check_enabled:
-            return False
-        safe_login = escape_filter_chars(login)
+            return set()
+
+        normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
+        if not normalized:
+            return set()
+
+        alternatives = "".join(
+            f"(sAMAccountName={escape_filter_chars(login)})"
+            for login in normalized
+        )
+        search_filter = f"(&(objectClass=user)(|{alternatives}))"
+
         with self._service_connection() as conn:
             conn.search(
                 self.settings.ad_base_dn,
-                f"(&(objectClass=user)(sAMAccountName={safe_login}))",
-                attributes=["distinguishedName"],
-                size_limit=1,
+                search_filter,
+                attributes=["sAMAccountName"],
+                size_limit=len(normalized),
             )
-            return bool(conn.entries)
+            return {
+                str(entry.sAMAccountName.value).lower()
+                for entry in conn.entries
+                if getattr(entry, "sAMAccountName", None)
+                and entry.sAMAccountName.value
+            }
+
+    def login_exists(self, login: str) -> bool:
+        normalized = login.strip().lower()
+        return normalized in self.logins_exist([normalized])
 
 
     def create_disabled_user(
