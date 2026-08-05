@@ -90,7 +90,7 @@ async function copyCredentials(button) {
 
   const originalText = button.textContent;
   try {
-    await writePlainTextToClipboard(lines.join('\n'));
+    await writePlainTextToClipboard(lines.join('\n') + '\n\n\n');
     button.textContent = 'Реквизиты скопированы';
   } catch (error) {
     button.textContent = 'Не удалось скопировать';
