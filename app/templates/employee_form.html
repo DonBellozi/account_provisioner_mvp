@@ -481,6 +481,10 @@ function updateOverallResult(login, sequence) {
 
   setProvisionEnabled(true);
   setSummary('free', `Логин «${login}» свободен и может быть зарегистрирован.`);
+
+  if (login === preferredLogin) {
+    stopCandidatePoolBecausePreferredIsFree();
+  }
 }
 
 async function runLoginCheck(forceRefresh = false) {
@@ -515,6 +519,23 @@ async function runLoginCheck(forceRefresh = false) {
   });
 
   await Promise.all(checks);
+
+  if (sequence !== checkSequence) {
+    return null;
+  }
+
+  const item = candidateResultMap.get(login);
+  if (!item) {
+    return null;
+  }
+
+  return {
+    login,
+    preferred: login === preferredLogin,
+    free: item.free === true,
+    ad: item.ad === true,
+    zimbra: item.zimbra === true,
+  };
 }
 
 function scheduleLoginCheck() {
@@ -533,6 +554,52 @@ function makeSpinner() {
   spinner.className = 'spinner';
   spinner.setAttribute('aria-hidden', 'true');
   return spinner;
+}
+
+function stopCandidatePoolBecausePreferredIsFree() {
+  if (candidatePoolController) {
+    candidatePoolController.abort();
+    candidatePoolController = null;
+  }
+
+  setCandidatePoolReady(true);
+  latestCandidateItems = [];
+  alternativeLogins.forEach(login => candidateResultMap.delete(login));
+
+  const list = document.getElementById('candidate-pool-list');
+  const summary = document.getElementById('candidate-pool-summary');
+
+  if (list) {
+    list.replaceChildren();
+    const message = document.createElement('div');
+    message.className = 'candidate-pool-empty';
+    message.textContent =
+      'Стандартный логин свободен. Проверка альтернатив не требуется.';
+    list.appendChild(message);
+  }
+
+  if (summary) {
+    summary.className = 'candidate-pool-summary complete';
+
+    const badge = document.createElement('span');
+    badge.className = 'candidate-count free';
+    badge.textContent = 'Основной логин свободен';
+
+    summary.replaceChildren(badge);
+  }
+}
+
+function preferredLoginIsConfirmedFree() {
+  const currentLogin = valueOf('login').toLowerCase();
+  const item = candidateResultMap.get(preferredLogin);
+
+  return (
+    currentLogin === preferredLogin
+    && item
+    && item.free === true
+    && item.ad === false
+    && item.zimbra === false
+  );
 }
 
 function renderCandidatePoolChecking() {
@@ -645,6 +712,11 @@ function renderCandidatePool(items) {
 }
 
 async function checkCandidatePool(forceRefresh = false) {
+  if (preferredLoginIsConfirmedFree()) {
+    stopCandidatePoolBecausePreferredIsFree();
+    return;
+  }
+
   if (!alternativeLogins.length) {
     setCandidatePoolReady(true);
     return;
@@ -715,10 +787,15 @@ checkButton.addEventListener('click', async () => {
 
   try {
     // Сначала оператор сразу получает результат выбранного логина.
-    await runLoginCheck(true);
+    const result = await runLoginCheck(true);
 
-    // После этого в фоне обновляются свободные альтернативы.
-    await checkCandidatePool(true);
+    if (result?.preferred && result.free) {
+      stopCandidatePoolBecausePreferredIsFree();
+    } else {
+      // Альтернативы нужны только когда основной логин занят
+      // или оператор проверяет другой вариант.
+      await checkCandidatePool(true);
+    }
   } finally {
     checkButton.disabled = false;
     checkButton.textContent = originalText;
@@ -772,7 +849,12 @@ personalEmailInput?.addEventListener('input', () => {
 updatePreview();
 updateProvisionButtonState();
 
-runLoginCheck().finally(() => {
+runLoginCheck().then(result => {
+  if (result?.preferred && result.free) {
+    stopCandidatePoolBecausePreferredIsFree();
+    return;
+  }
+
   checkCandidatePool();
 });
 </script>
