@@ -21,6 +21,17 @@ class NameTests(unittest.TestCase):
         self.assertEqual(person.last_name, "Иванов")
         self.assertEqual(person.middle_name, "")
 
+    def test_parse_without_personal_email(self):
+        person = parse_two_line_input("Иванов Иван Иванович")
+        self.assertEqual(person.last_name, "Иванов")
+        self.assertEqual(person.first_name, "Иван")
+        self.assertEqual(person.middle_name, "Иванович")
+        self.assertEqual(person.personal_email, "")
+
+    def test_rejects_multiple_lines_without_email(self):
+        with self.assertRaisesRegex(ValueError, "одной строкой"):
+            parse_two_line_input("Иванов Иван\nДополнительная строка")
+
     def test_transliteration(self):
         self.assertEqual(transliterate("Ёлкин"), "elkin")
         self.assertEqual(transliterate("Щукин"), "shchukin")

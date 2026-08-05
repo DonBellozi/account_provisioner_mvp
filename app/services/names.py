@@ -70,19 +70,48 @@ def validate_person_name(last_name: str, first_name: str, middle_name: str = "")
 
 
 def parse_two_line_input(raw: str) -> ParsedPerson:
-    lines = [normalize_spaces(line) for line in raw.splitlines() if normalize_spaces(line)]
-    if len(lines) < 2:
-        raise ValueError("Вставьте ФИО и личный email двумя строками")
+    """Разобрать ФИО и необязательный личный email.
 
-    email_line = next((line for line in lines if "@" in line), "")
-    fio_line = next((line for line in lines if line != email_line), "")
-    if not email_line or not fio_line:
-        raise ValueError("Не удалось определить строку с ФИО или email")
+    Поддерживаются два варианта:
+    - одна строка с ФИО;
+    - две строки с ФИО и email в любом порядке.
+    """
+    lines = [
+        normalize_spaces(line)
+        for line in raw.splitlines()
+        if normalize_spaces(line)
+    ]
+    if not lines:
+        raise ValueError(
+            "Введите ФИО одной строкой и при наличии личный email второй строкой"
+        )
 
-    try:
-        email = validate_email(email_line, check_deliverability=False).normalized
-    except EmailNotValidError as exc:
-        raise ValueError(f"Некорректный личный email: {exc}") from exc
+    email_lines = [line for line in lines if "@" in line]
+    if len(email_lines) > 1:
+        raise ValueError("Обнаружено несколько строк с email")
+
+    email = ""
+    if email_lines:
+        email_line = email_lines[0]
+        fio_lines = [line for line in lines if line != email_line]
+        if len(fio_lines) != 1:
+            raise ValueError(
+                "Не удалось однозначно определить строку с ФИО"
+            )
+        fio_line = fio_lines[0]
+        try:
+            email = validate_email(
+                email_line,
+                check_deliverability=False,
+            ).normalized
+        except EmailNotValidError as exc:
+            raise ValueError(f"Некорректный личный email: {exc}") from exc
+    else:
+        if len(lines) != 1:
+            raise ValueError(
+                "Без личного email ФИО необходимо ввести одной строкой"
+            )
+        fio_line = lines[0]
 
     parts = fio_line.split(" ")
     if len(parts) < 2:

@@ -11,7 +11,7 @@
   </ul>
 </div>
 {% else %}
-<div class="alert success">Учетные записи созданы, реквизиты отправлены.</div>
+<div class="alert success">Учетные записи созданы. Реквизиты отправлены на доступные адреса.</div>
 {% endif %}
 
 <section class="card">
@@ -20,7 +20,16 @@
     <span>AD создана</span><strong>{{ 'Да' if credentials.ad_created else 'Нет' }}</strong>
     <span>AD включена</span><strong>{{ 'Да' if credentials.ad_enabled else 'Нет' }}</strong>
     <span>Zimbra создана</span><strong>{{ 'Да' if credentials.zimbra_created else 'Нет' }}</strong>
-    <span>Письмо на личный адрес</span><strong>{{ 'Отправлено' if credentials.personal_mail_sent else 'Не отправлено' }}</strong>
+    <span>Письмо на личный адрес</span>
+    <strong>
+      {% if not credentials.personal_email_provided %}
+      Не требуется
+      {% elif credentials.personal_mail_sent %}
+      Отправлено
+      {% else %}
+      Не отправлено
+      {% endif %}
+    </strong>
     <span>Письмо на корпоративный адрес</span><strong>{{ 'Отправлено' if credentials.corporate_mail_sent else 'Не отправлено' }}</strong>
   </div>
 </section>

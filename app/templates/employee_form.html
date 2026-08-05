@@ -6,19 +6,50 @@
 
 {% if not parsed %}
 <section class="card">
-  <h2>Вставьте две строки</h2>
+  <h2>Введите данные работника</h2>
   <form method="post" action="/employees/parse" class="stack" id="parse-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>ФИО и личный email
-      <textarea name="raw_input" rows="5" required placeholder="Иванов Иван Иванович&#10;ivanov.personal@example.com">{{ raw_input|default('') }}</textarea>
+    <input type="hidden"
+           name="confirm_no_personal_email"
+           id="parse-confirm-no-personal-email"
+           value="false">
+    <label>ФИО и при наличии личный email
+      <textarea id="raw-input"
+                name="raw_input"
+                rows="5"
+                required
+                placeholder="Иванов Иван Иванович&#10;ivanov.personal@example.com">{{ raw_input|default('') }}</textarea>
     </label>
-    <p class="muted">Система определит строку с email, разложит ФИО по полям и проверит, что в имени нет случайных латинских букв.</p>
+    <p class="muted">
+      ФИО вводится одной строкой. Личный email можно добавить второй строкой
+      в любом порядке или не указывать.
+    </p>
     <button type="submit" id="parse-button">Разобрать и проверить логин</button>
   </form>
 </section>
 
 <script>
-document.getElementById('parse-form')?.addEventListener('submit', () => {
+document.getElementById('parse-form')?.addEventListener('submit', event => {
+  const rawInput = document.getElementById('raw-input');
+  const confirmation = document.getElementById(
+    'parse-confirm-no-personal-email'
+  );
+  const hasEmail = (rawInput?.value || '')
+    .split(/\r?\n/)
+    .some(line => line.includes('@'));
+
+  if (!hasEmail) {
+    const confirmed = window.confirm(
+      'ФИО введено без личного email. ' +
+      'Реквизиты почты не будут отправлены на личный адрес. Продолжить?'
+    );
+    if (!confirmed) {
+      event.preventDefault();
+      return;
+    }
+    confirmation.value = 'true';
+  }
+
   const button = document.getElementById('parse-button');
   if (button) {
     button.disabled = true;
@@ -29,13 +60,26 @@ document.getElementById('parse-form')?.addEventListener('submit', () => {
 {% else %}
 <form method="post" action="/employees/provision" class="stack" id="provision-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden"
+         name="confirm_no_personal_email"
+         id="confirm-no-personal-email"
+         value="{{ 'true' if no_email_confirmed|default(false) else 'false' }}">
   <section class="card">
     <h2>Данные работника</h2>
     <div class="grid two">
       <label>Фамилия<input id="last_name" name="last_name" value="{{ parsed.last_name }}" required></label>
       <label>Имя<input id="first_name" name="first_name" value="{{ parsed.first_name }}" required></label>
       <label>Отчество<input id="middle_name" name="middle_name" value="{{ parsed.middle_name }}"></label>
-      <label>Личный email<input type="email" name="personal_email" value="{{ parsed.personal_email }}" required></label>
+      <label>Личный email – необязательно
+        <input id="personal_email"
+               type="email"
+               name="personal_email"
+               value="{{ parsed.personal_email }}"
+               autocomplete="email">
+        <span class="muted">
+          Без личного адреса реквизиты почты останутся только на итоговой странице.
+        </span>
+      </label>
     </div>
   </section>
 
@@ -145,6 +189,10 @@ const alternativeLogins = candidateLogins.slice(1);
 const provisionForm = document.getElementById('provision-form');
 const provisionButton = document.getElementById('provision-button');
 const loginInput = document.getElementById('login');
+const personalEmailInput = document.getElementById('personal_email');
+const noEmailConfirmationInput = document.getElementById(
+  'confirm-no-personal-email'
+);
 const checkButton = document.getElementById('check-login-button');
 const preferredLoginNote = document.getElementById('preferred-login-note');
 const csrfToken = provisionForm.querySelector('input[name="csrf"]').value;
@@ -678,6 +726,23 @@ checkButton.addEventListener('click', async () => {
 
 provisionForm.addEventListener('submit', event => {
   const currentLogin = valueOf('login').toLowerCase();
+  const personalEmail = (personalEmailInput?.value || '').trim();
+
+  if (
+    !personalEmail
+    && noEmailConfirmationInput?.value !== 'true'
+  ) {
+    event.preventDefault();
+    const confirmed = window.confirm(
+      'Личный email не указан. Реквизиты почты не будут отправлены ' +
+      'на личный адрес. Создать учетные записи?'
+    );
+    if (confirmed) {
+      noEmailConfirmationInput.value = 'true';
+      provisionForm.requestSubmit();
+    }
+    return;
+  }
 
   if (!loginCheckReady || lastCheckedLogin !== currentLogin) {
     event.preventDefault();
@@ -695,6 +760,12 @@ provisionForm.addEventListener('submit', event => {
 
   provisionButton.disabled = true;
   provisionButton.textContent = 'Создание учетных записей...';
+});
+
+personalEmailInput?.addEventListener('input', () => {
+  if (noEmailConfirmationInput) {
+    noEmailConfirmationInput.value = 'false';
+  }
 });
 
 updatePreview();

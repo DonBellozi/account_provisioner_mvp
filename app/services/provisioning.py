@@ -38,6 +38,7 @@ class ProvisioningCredentials:
     ad_created: bool
     ad_enabled: bool
     zimbra_created: bool
+    personal_email_provided: bool
     personal_mail_sent: bool
     corporate_mail_sent: bool
     warnings: tuple[str, ...]
@@ -214,7 +215,7 @@ class ProvisioningService:
                 warnings.append(f"Учетная запись AD создана, но осталась отключенной: {exc}")
 
         # 4. Отправка писем не откатывает созданные учетные записи.
-        if operation.zimbra_created:
+        if operation.zimbra_created and data.personal_email:
             try:
                 self.mailer.send_mail_credentials(
                     profile=mail_profile,
@@ -226,7 +227,10 @@ class ProvisioningService:
                 operation.personal_mail_sent = True
                 db.commit()
             except Exception as exc:
-                warnings.append(f"Реквизиты почты не отправлены на личный адрес: {exc}")
+                warnings.append(
+                    "Реквизиты почты не отправлены на личный адрес: "
+                    f"{exc}"
+                )
 
         if operation.ad_enabled and operation.zimbra_created:
             try:
@@ -242,12 +246,17 @@ class ProvisioningService:
             except Exception as exc:
                 warnings.append(f"Реквизиты AD не отправлены на корпоративную почту: {exc}")
 
+        personal_delivery_complete = (
+            operation.personal_mail_sent
+            if data.personal_email
+            else True
+        )
         complete = all(
             [
                 operation.ad_created,
                 operation.ad_enabled,
                 operation.zimbra_created,
-                operation.personal_mail_sent,
+                personal_delivery_complete,
                 operation.corporate_mail_sent,
             ]
         )
@@ -285,6 +294,7 @@ class ProvisioningService:
             ad_created=operation.ad_created,
             ad_enabled=operation.ad_enabled,
             zimbra_created=operation.zimbra_created,
+            personal_email_provided=bool(data.personal_email),
             personal_mail_sent=operation.personal_mail_sent,
             corporate_mail_sent=operation.corporate_mail_sent,
             warnings=tuple(warnings),

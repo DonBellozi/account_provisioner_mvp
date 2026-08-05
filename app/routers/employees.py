@@ -91,7 +91,11 @@ def _provisioning_journal_item(operation: ProvisioningOperation) -> dict[str, ob
             ("Ящик Zimbra создан", _yes_no(operation.zimbra_created)),
             (
                 "Реквизиты почты отправлены на личный адрес",
-                _yes_no(operation.personal_mail_sent),
+                (
+                    _yes_no(operation.personal_mail_sent)
+                    if operation.personal_email
+                    else "Не требуется"
+                ),
             ),
             (
                 "Реквизиты AD отправлены на корпоративную почту",
@@ -200,12 +204,23 @@ def new_employee(request: Request, settings: Settings = Depends(get_settings)):
 def parse_employee(
     request: Request,
     raw_input: str = Form(...),
+    confirm_no_personal_email: str = Form("false"),
     csrf: str = Form(...),
     settings: Settings = Depends(get_settings),
 ):
     validate_csrf(request, csrf)
     try:
         parsed = parse_two_line_input(raw_input)
+        no_email_confirmed = (
+            confirm_no_personal_email.strip().lower() == "true"
+        )
+        if not parsed.personal_email and not no_email_confirmed:
+            raise ValueError(
+                "ФИО введено без личного email. "
+                "Подтвердите продолжение без отправки реквизитов "
+                "на личный адрес."
+            )
+
         candidates = build_login_candidates(
             parsed.last_name,
             parsed.first_name,
@@ -230,6 +245,7 @@ def parse_employee(
                 error="",
                 raw_input=raw_input,
                 domain_mode=settings.zimbra_domain_mode,
+                no_email_confirmed=no_email_confirmed,
             ),
         )
     except Exception as exc:
@@ -389,7 +405,8 @@ def provision_employee(
     last_name: str = Form(...),
     first_name: str = Form(...),
     middle_name: str = Form(""),
-    personal_email: str = Form(...),
+    personal_email: str = Form(""),
+    confirm_no_personal_email: str = Form("false"),
     login: str = Form(...),
     mail_domain: str = Form(...),
     csrf: str = Form(...),
@@ -407,11 +424,31 @@ def provision_employee(
         if not LOGIN_RE.fullmatch(login):
             raise ValueError("Логин должен начинаться с латинской буквы и содержать не более 20 символов")
 
-        last_name, first_name, middle_name = validate_person_name(last_name, first_name, middle_name)
-        try:
-            personal_email = validate_email(personal_email, check_deliverability=False).normalized
-        except EmailNotValidError as exc:
-            raise ValueError(f"Некорректный личный email: {exc}") from exc
+        last_name, first_name, middle_name = validate_person_name(
+            last_name,
+            first_name,
+            middle_name,
+        )
+        no_email_confirmed = (
+            confirm_no_personal_email.strip().lower() == "true"
+        )
+        if personal_email:
+            try:
+                personal_email = validate_email(
+                    personal_email,
+                    check_deliverability=False,
+                ).normalized
+            except EmailNotValidError as exc:
+                raise ValueError(
+                    f"Некорректный личный email: {exc}"
+                ) from exc
+        elif not no_email_confirmed:
+            raise ValueError(
+                "Личный email не указан. Подтвердите создание "
+                "учетных записей без отправки реквизитов "
+                "на личный адрес."
+            )
+
         if settings.zimbra_domains and mail_domain not in settings.zimbra_domains:
             raise ValueError("Выбран неизвестный почтовый домен")
 
@@ -456,6 +493,9 @@ def provision_employee(
                 domain_mode=settings.zimbra_domain_mode,
                 selected_login=login,
                 selected_domain=mail_domain,
+                no_email_confirmed=(
+                    confirm_no_personal_email.strip().lower() == "true"
+                ),
             ),
             status_code=400,
         )
