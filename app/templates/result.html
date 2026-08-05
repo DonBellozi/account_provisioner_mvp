@@ -20,17 +20,22 @@
     <span>AD создана</span><strong>{{ 'Да' if credentials.ad_created else 'Нет' }}</strong>
     <span>AD включена</span><strong>{{ 'Да' if credentials.ad_enabled else 'Нет' }}</strong>
     <span>Zimbra создана</span><strong>{{ 'Да' if credentials.zimbra_created else 'Нет' }}</strong>
-    <span>Письмо на личный адрес</span>
+    <span>Письмо с реквизитами почты</span>
     <strong>
-      {% if not credentials.personal_email_provided %}
-      Не требуется
-      {% elif credentials.personal_mail_sent %}
-      Отправлено
+      {% if credentials.personal_mail_sent %}
+      Отправлено на {{ credentials.mail_credentials_recipient }}
       {% else %}
       Не отправлено
       {% endif %}
     </strong>
-    <span>Письмо на корпоративный адрес</span><strong>{{ 'Отправлено' if credentials.corporate_mail_sent else 'Не отправлено' }}</strong>
+    <span>Письмо с реквизитами AD</span>
+    <strong>
+      {% if credentials.corporate_mail_sent %}
+      Отправлено на {{ credentials.corporate_email }}
+      {% else %}
+      Не отправлено
+      {% endif %}
+    </strong>
   </div>
 </section>
 

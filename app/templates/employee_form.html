@@ -40,8 +40,8 @@ document.getElementById('parse-form')?.addEventListener('submit', event => {
 
   if (!hasEmail) {
     const confirmed = window.confirm(
-      'ФИО введено без личного email. ' +
-      'Реквизиты почты не будут отправлены на личный адрес. Продолжить?'
+      'ФИО введено без личного email. Оба письма с реквизитами ' +
+      'будут отправлены на создаваемую корпоративную почту. Продолжить?'
     );
     if (!confirmed) {
       event.preventDefault();
@@ -77,7 +77,8 @@ document.getElementById('parse-form')?.addEventListener('submit', event => {
                value="{{ parsed.personal_email }}"
                autocomplete="email">
         <span class="muted">
-          Без личного адреса реквизиты почты останутся только на итоговой странице.
+          Без личного адреса оба письма с реквизитами будут отправлены
+          на создаваемую корпоративную почту.
         </span>
       </label>
     </div>
@@ -734,8 +735,8 @@ provisionForm.addEventListener('submit', event => {
   ) {
     event.preventDefault();
     const confirmed = window.confirm(
-      'Личный email не указан. Реквизиты почты не будут отправлены ' +
-      'на личный адрес. Создать учетные записи?'
+      'Личный email не указан. Оба письма с реквизитами будут ' +
+      'отправлены на корпоративную почту. Создать учетные записи?'
     );
     if (confirmed) {
       noEmailConfirmationInput.value = 'true';

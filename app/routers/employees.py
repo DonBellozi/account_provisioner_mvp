@@ -90,12 +90,12 @@ def _provisioning_journal_item(operation: ProvisioningOperation) -> dict[str, ob
             ("Учетная запись AD включена", _yes_no(operation.ad_enabled)),
             ("Ящик Zimbra создан", _yes_no(operation.zimbra_created)),
             (
-                "Реквизиты почты отправлены на личный адрес",
-                (
-                    _yes_no(operation.personal_mail_sent)
-                    if operation.personal_email
-                    else "Не требуется"
-                ),
+                "Получатель реквизитов почты",
+                operation.personal_email or operation.corporate_email,
+            ),
+            (
+                "Реквизиты почты отправлены",
+                _yes_no(operation.personal_mail_sent),
             ),
             (
                 "Реквизиты AD отправлены на корпоративную почту",
@@ -216,9 +216,9 @@ def parse_employee(
         )
         if not parsed.personal_email and not no_email_confirmed:
             raise ValueError(
-                "ФИО введено без личного email. "
-                "Подтвердите продолжение без отправки реквизитов "
-                "на личный адрес."
+                "ФИО введено без личного email. Подтвердите, "
+                "что оба письма с реквизитами будут отправлены "
+                "на создаваемую корпоративную почту."
             )
 
         candidates = build_login_candidates(
@@ -445,8 +445,8 @@ def provision_employee(
         elif not no_email_confirmed:
             raise ValueError(
                 "Личный email не указан. Подтвердите создание "
-                "учетных записей без отправки реквизитов "
-                "на личный адрес."
+                "учетных записей с отправкой обоих писем "
+                "на корпоративную почту."
             )
 
         if settings.zimbra_domains and mail_domain not in settings.zimbra_domains:

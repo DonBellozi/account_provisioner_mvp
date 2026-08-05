@@ -39,6 +39,7 @@ class ProvisioningCredentials:
     ad_enabled: bool
     zimbra_created: bool
     personal_email_provided: bool
+    mail_credentials_recipient: str
     personal_mail_sent: bool
     corporate_mail_sent: bool
     warnings: tuple[str, ...]
@@ -215,11 +216,16 @@ class ProvisioningService:
                 warnings.append(f"Учетная запись AD создана, но осталась отключенной: {exc}")
 
         # 4. Отправка писем не откатывает созданные учетные записи.
-        if operation.zimbra_created and data.personal_email:
+        # При отсутствии личного адреса письмо с реквизитами почты
+        # отправляется на только что созданную именную корпоративную почту.
+        mail_credentials_recipient = (
+            data.personal_email or corporate_email
+        )
+        if operation.zimbra_created:
             try:
                 self.mailer.send_mail_credentials(
                     profile=mail_profile,
-                    personal_email=data.personal_email,
+                    personal_email=mail_credentials_recipient,
                     full_name=full_name,
                     corporate_email=corporate_email,
                     mail_password=mail_password,
@@ -228,8 +234,8 @@ class ProvisioningService:
                 db.commit()
             except Exception as exc:
                 warnings.append(
-                    "Реквизиты почты не отправлены на личный адрес: "
-                    f"{exc}"
+                    "Реквизиты почты не отправлены на "
+                    f"{mail_credentials_recipient}: {exc}"
                 )
 
         if operation.ad_enabled and operation.zimbra_created:
@@ -246,17 +252,12 @@ class ProvisioningService:
             except Exception as exc:
                 warnings.append(f"Реквизиты AD не отправлены на корпоративную почту: {exc}")
 
-        personal_delivery_complete = (
-            operation.personal_mail_sent
-            if data.personal_email
-            else True
-        )
         complete = all(
             [
                 operation.ad_created,
                 operation.ad_enabled,
                 operation.zimbra_created,
-                personal_delivery_complete,
+                operation.personal_mail_sent,
                 operation.corporate_mail_sent,
             ]
         )
@@ -295,6 +296,7 @@ class ProvisioningService:
             ad_enabled=operation.ad_enabled,
             zimbra_created=operation.zimbra_created,
             personal_email_provided=bool(data.personal_email),
+            mail_credentials_recipient=mail_credentials_recipient,
             personal_mail_sent=operation.personal_mail_sent,
             corporate_mail_sent=operation.corporate_mail_sent,
             warnings=tuple(warnings),
