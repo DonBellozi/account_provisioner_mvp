@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from ldap3 import ALL, NTLM, SIMPLE, Connection, MODIFY_ADD, MODIFY_REPLACE, Server, Tls
 from ldap3.core.exceptions import LDAPException
 from ldap3.utils.conv import escape_filter_chars
+from ldap3.utils.dn import escape_rdn
 
 from app.config import Settings
 
@@ -257,20 +258,28 @@ class ActiveDirectoryService:
         corporate_email: str,
     ) -> ADCreateResult:
         upn = f"{login}@{self.settings.ad_upn_suffix}"
-        display_name = " ".join(part for part in [last_name, first_name, middle_name] if part)
-        # CN строится из уникального логина, иначе полный тезка в той же OU
-        # не сможет быть создан. displayName при этом остается обычным ФИО.
-        cn = login.replace(",", "\\,")
-        dn = f"CN={cn},{self.settings.ad_users_ou}"
+        display_name = " ".join(
+            part for part in [last_name, first_name, middle_name] if part
+        )
+
+        # Поле «Полное имя» / Name в оснастке AD формируется из RDN (CN),
+        # поэтому основным CN должно быть ФИО, а не sAMAccountName.
+        primary_cn = display_name
+        dn = f"CN={escape_rdn(primary_cn)},{self.settings.ad_users_ou}"
 
         if not password_candidates:
             raise ValueError("Не переданы варианты пароля AD")
         if self.settings.dry_run:
-            return ADCreateResult(dn=dn, login=login, upn=upn, accepted_password=password_candidates[0])
+            return ADCreateResult(
+                dn=dn,
+                login=login,
+                upn=upn,
+                accepted_password=password_candidates[0],
+            )
 
         attributes = {
             "objectClass": ["top", "person", "organizationalPerson", "user"],
-            "cn": login,
+            "cn": primary_cn,
             "displayName": display_name,
             "givenName": first_name,
             "sn": last_name,
@@ -281,7 +290,28 @@ class ActiveDirectoryService:
         }
         with self._service_connection() as conn:
             if not conn.add(dn, attributes=attributes):
-                raise RuntimeError(f"AD не создал пользователя: {conn.result.get('message') or conn.result}")
+                # CN должен быть уникален внутри одной OU. Для полного тезки
+                # сохраняем чистое ФИО в displayName, а в CN добавляем логин.
+                if int(conn.result.get("result") or 0) == 68:
+                    fallback_cn = f"{display_name} ({login})"
+                    dn = (
+                        f"CN={escape_rdn(fallback_cn)},"
+                        f"{self.settings.ad_users_ou}"
+                    )
+                    fallback_attributes = {
+                        **attributes,
+                        "cn": fallback_cn,
+                    }
+                    if not conn.add(dn, attributes=fallback_attributes):
+                        raise RuntimeError(
+                            "AD не создал пользователя с резервным полным "
+                            f"именем: {conn.result.get('message') or conn.result}"
+                        )
+                else:
+                    raise RuntimeError(
+                        "AD не создал пользователя: "
+                        f"{conn.result.get('message') or conn.result}"
+                    )
             accepted_password = ""
             last_password_error = ""
             for candidate in password_candidates:
