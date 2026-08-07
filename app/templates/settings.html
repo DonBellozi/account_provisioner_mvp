@@ -106,17 +106,70 @@
       <div class="integration-test-result" id="integration-result-smtp"></div>
     </article>
 
-    <article class="integration-card integration-card-future">
+    <article class="integration-card" id="onec-card">
       <div class="integration-card-heading">
         <div>
           <h3>1С / кадровая выгрузка</h3>
-          <span class="integration-badge">Не настроено</span>
+          <span class="integration-badge{% if integrations.onec.configured %} active{% endif %}"
+                id="integration-badge-onec">
+            {{ integrations.onec.badge }}
+          </span>
+        </div>
+        <div class="integration-card-actions">
+          <button class="button secondary integration-test"
+                  type="button"
+                  data-integration="onec">
+            Проверить IMAP
+          </button>
+          <button class="button secondary"
+                  type="button"
+                  id="onec-find-latest">
+            Найти выгрузку
+          </button>
+          <button class="button"
+                  type="button"
+                  id="onec-analyze-latest">
+            Получить и проанализировать
+          </button>
         </div>
       </div>
-      <p>
-        Получение XLSX из почты, безопасный импорт и анализ окончательных
-        увольнений будут подключены следующим этапом.
-      </p>
+
+      <dl class="integration-details">
+        <dt>IMAP-сервер</dt><dd>{{ integrations.onec.server }}</dd>
+        <dt>Порт</dt><dd>{{ integrations.onec.port }}</dd>
+        <dt>SSL</dt><dd>{{ integrations.onec.ssl }}</dd>
+        <dt>Пользователь</dt><dd>{{ integrations.onec.username }}</dd>
+        <dt>Пароль</dt><dd>{{ integrations.onec.password }}</dd>
+        <dt>Папка</dt><dd>{{ integrations.onec.folder }}</dd>
+        <dt>Фильтр отправителя</dt><dd>{{ integrations.onec.sender }}</dd>
+        <dt>Глубина поиска</dt><dd>{{ integrations.onec.lookback }}</dd>
+        <dt>Имя вложения</dt><dd>{{ integrations.onec.filename }}</dd>
+        <dt>Каталог данных</dt><dd><code>{{ integrations.onec.data_dir }}</code></dd>
+        <dt>HMAC-ключ идентификации</dt><dd>{{ integrations.onec.hash_secret }}</dd>
+      </dl>
+
+      <div class="alert warning onec-safety-note">
+        Первый этап работает только как наблюдатель: письмо читается через IMAP
+        в режиме readonly, XLSX анализируется локально. Изменения AD, Zimbra,
+        отправка писем и действия в IT Invent не выполняются.
+      </div>
+
+      <div class="integration-test-result" id="integration-result-onec"></div>
+      <div class="onec-result" id="onec-result">
+        {% if onec_last_report %}
+        <div class="onec-report-heading">
+          <strong>Последний анализ</strong>
+          <span class="muted">{{ onec_last_report.analyzed_at }}</span>
+        </div>
+        <div class="onec-stat-grid">
+          <div><span>Работников</span><strong>{{ onec_last_report.workers_count }}</strong></div>
+          <div><span>Назначений</span><strong>{{ onec_last_report.placements_count }}</strong></div>
+          <div><span>Несколько назначений</span><strong>{{ onec_last_report.multiple_placements_count }}</strong></div>
+          <div><span>Без email</span><strong>{{ onec_last_report.missing_email_count }}</strong></div>
+        </div>
+        <div class="onec-dismissal-note">{{ onec_last_report.dismissal_note }}</div>
+        {% endif %}
+      </div>
     </article>
 
     <article class="integration-card integration-card-future">
@@ -215,6 +268,165 @@
       }
     });
   });
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function mailSummary(mail) {
+    return `
+      <dl class="integration-details onec-mail-details">
+        <dt>Дата письма</dt><dd>${escapeHtml(mail.message_date || '–')}</dd>
+        <dt>Отправитель</dt><dd>${escapeHtml(mail.sender || '–')}</dd>
+        <dt>Тема</dt><dd>${escapeHtml(mail.subject || '–')}</dd>
+        <dt>Вложение</dt><dd>${escapeHtml(mail.filename || '–')}</dd>
+        <dt>SHA-256</dt><dd><code>${escapeHtml(mail.file_hash || '–')}</code></dd>
+      </dl>`;
+  }
+
+  function renderSamples(title, rows) {
+    if (!rows || !rows.length) return '';
+    const items = rows.map(item => `
+      <li>
+        <strong>${escapeHtml(item.fio || item.login || 'Без имени')}</strong>
+        ${item.login ? `<code>${escapeHtml(item.login)}</code>` : ''}
+        ${item.email ? `<span>${escapeHtml(item.email)}</span>` : ''}
+      </li>`).join('');
+    return `
+      <details class="onec-samples">
+        <summary>${escapeHtml(title)} – показать примеры</summary>
+        <ul>${items}</ul>
+      </details>`;
+  }
+
+  function renderOnecReport(report) {
+    const target = document.getElementById('onec-result');
+    const comparison = report.comparison || {};
+    const headers = (report.headers || [])
+      .map(value => `<span class="onec-chip">${escapeHtml(value)}</span>`)
+      .join('');
+    const states = (report.states || [])
+      .map(value => `<span class="onec-chip">${escapeHtml(value)}</span>`)
+      .join('') || '<span class="muted">Не обнаружены</span>';
+    const dismissalColumns = (report.potential_dismissal_columns || [])
+      .map(value => `<span class="onec-chip warning">${escapeHtml(value)}</span>`)
+      .join('') || '<span class="muted">Не обнаружены</span>';
+
+    target.innerHTML = `
+      <div class="onec-report-heading">
+        <strong>Результат DRY_RUN-анализа</strong>
+        <span class="muted">${escapeHtml(report.analyzed_at || '')}</span>
+      </div>
+
+      ${mailSummary(report.mail || {})}
+
+      <div class="onec-stat-grid">
+        <div><span>Работников</span><strong>${report.workers_count ?? 0}</strong></div>
+        <div><span>Назначений</span><strong>${report.placements_count ?? 0}</strong></div>
+        <div><span>Несколько назначений</span><strong>${report.multiple_placements_count ?? 0}</strong></div>
+        <div><span>Без email</span><strong>${report.missing_email_count ?? 0}</strong></div>
+      </div>
+
+      <div class="onec-diff-grid">
+        <div><span>Новые</span><strong>${comparison.new_workers ?? 0}</strong></div>
+        <div><span>Исчезли из выгрузки</span><strong>${comparison.missing_workers ?? 0}</strong></div>
+        <div><span>Изменились</span><strong>${comparison.changed_workers ?? 0}</strong></div>
+      </div>
+
+      <div class="alert warning onec-dismissal-note">
+        ${escapeHtml(report.dismissal_note || '')}
+      </div>
+      <p class="muted">
+        ${escapeHtml(comparison.note || '')}
+      </p>
+
+      ${renderSamples('Новые работники', comparison.new_samples)}
+      ${renderSamples('Исчезли из текущей выгрузки', comparison.missing_samples)}
+      ${renderSamples('Изменившиеся работники', comparison.changed_samples)}
+
+      <div class="onec-report-section">
+        <strong>Состояния из 1С</strong>
+        <div class="onec-chip-list">${states}</div>
+      </div>
+
+      <div class="onec-report-section">
+        <strong>Поля, похожие на дату/признак увольнения</strong>
+        <div class="onec-chip-list">${dismissalColumns}</div>
+      </div>
+
+      <details class="onec-headers">
+        <summary>Показать все найденные заголовки XLSX (${report.headers?.length || 0})</summary>
+        <div class="onec-chip-list">${headers}</div>
+      </details>
+    `;
+  }
+
+  async function postOnec(url, button, loadingText) {
+    const target = document.getElementById('onec-result');
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = loadingText;
+    target.className = 'onec-result checking';
+    target.textContent = 'Выполняется запрос...';
+
+    try {
+      const body = new URLSearchParams({csrf});
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body,
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || 'Ошибка операции 1С');
+      }
+
+      target.className = 'onec-result success';
+      return payload;
+    } catch (error) {
+      target.className = 'onec-result error';
+      target.textContent = error.message || String(error);
+      throw error;
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
+  document.getElementById('onec-find-latest')?.addEventListener('click', async event => {
+    try {
+      const payload = await postOnec(
+        '/settings/onec/find-latest',
+        event.currentTarget,
+        'Ищу...'
+      );
+      const target = document.getElementById('onec-result');
+      target.innerHTML = `
+        <div class="onec-report-heading"><strong>Последняя найденная выгрузка</strong></div>
+        ${mailSummary(payload.mail || {})}
+        <p class="muted">
+          Файл только найден в почте. Анализ XLSX еще не выполнялся.
+        </p>`;
+    } catch (_) {}
+  });
+
+  document.getElementById('onec-analyze-latest')?.addEventListener('click', async event => {
+    try {
+      const payload = await postOnec(
+        '/settings/onec/analyze-latest',
+        event.currentTarget,
+        'Анализирую...'
+      );
+      renderOnecReport(payload.report || {});
+    } catch (_) {}
+  });
+
 })();
 </script>
 {% endblock %}

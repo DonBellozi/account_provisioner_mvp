@@ -9,3 +9,4 @@ ldap3>=2.9,<3
 paramiko>=3.5,<5
 email-validator>=2.2,<3
 itsdangerous>=2.2,<3
+openpyxl>=3.1,<4

@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.security import get_or_create_csrf, require_admin, validate_csrf
 from app.services.ad import ActiveDirectoryService
 from app.services.mailer import CredentialMailer
+from app.services.onec_import import OneCImportService
 from app.services.zimbra import ZimbraService
 
 router = APIRouter()
@@ -51,6 +52,12 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
         and settings.zimbra_backend != "disabled"
     )
     smtp_configured = bool(settings.smtp_host)
+    onec_configured = bool(
+        settings.onec_imap_host
+        and settings.onec_imap_username
+        and settings.onec_imap_password
+        and settings.onec_attachment_filename
+    )
 
     if settings.smtp_ssl:
         smtp_mode = "SSL/TLS"
@@ -104,6 +111,25 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
             "timeout": f"{settings.smtp_timeout_seconds} сек.",
             "retries": settings.smtp_retry_attempts,
         },
+        "onec": {
+            "configured": onec_configured,
+            "badge": "Настроено" if onec_configured else "Не настроено",
+            "server": settings.onec_imap_host or "–",
+            "port": settings.onec_imap_port,
+            "ssl": _yes_no(settings.onec_imap_ssl),
+            "username": settings.onec_imap_username or "–",
+            "password": _set_not_set(settings.onec_imap_password),
+            "folder": settings.onec_imap_folder or "INBOX",
+            "sender": settings.onec_imap_from_contains or "без фильтра",
+            "lookback": f"{settings.onec_imap_lookback_days} дн.",
+            "filename": settings.onec_attachment_filename or "–",
+            "data_dir": settings.onec_data_dir,
+            "hash_secret": (
+                "ONEC_WORKER_HASH_SECRET"
+                if settings.onec_worker_hash_secret.strip()
+                else "APP_SECRET_KEY (временно)"
+            ),
+        },
     }
 
 
@@ -113,6 +139,7 @@ def settings_overview(
     settings: Settings = Depends(get_settings),
 ):
     current = require_admin(request)
+    onec_service = OneCImportService(settings)
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -120,6 +147,7 @@ def settings_overview(
             "user": current,
             "csrf": get_or_create_csrf(request),
             "integrations": _integration_overview(settings),
+            "onec_last_report": onec_service.load_last_report(),
         },
     )
 
@@ -141,6 +169,8 @@ def test_integration(
             message = ZimbraService(settings).test_connection()
         elif integration == "smtp":
             message = CredentialMailer(settings).test_connection()
+        elif integration == "onec":
+            message = OneCImportService(settings).test_connection()
         else:
             return JSONResponse(
                 {"ok": False, "error": "Неизвестная интеграция"},
@@ -148,6 +178,45 @@ def test_integration(
             )
 
         return {"ok": True, "message": message}
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=503,
+        )
+
+
+
+@router.post("/settings/onec/find-latest")
+def onec_find_latest(
+    request: Request,
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    require_admin(request)
+
+    try:
+        result = OneCImportService(settings).find_latest()
+        return {"ok": True, "mail": result}
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=503,
+        )
+
+
+@router.post("/settings/onec/analyze-latest")
+def onec_analyze_latest(
+    request: Request,
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    require_admin(request)
+
+    try:
+        report = OneCImportService(settings).analyze_latest()
+        return {"ok": True, "report": report}
     except Exception as exc:
         return JSONResponse(
             {"ok": False, "error": str(exc)},

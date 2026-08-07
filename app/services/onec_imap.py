@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import email
+import hashlib
+import imaplib
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from email.header import decode_header
+
+from app.config import Settings
+
+
+@dataclass(frozen=True)
+class OneCAttachment:
+    uid: str
+    message_date: str
+    sender: str
+    subject: str
+    filename: str
+    file_hash: str
+    payload: bytes
+
+
+def decode_mime(value: str | None) -> str:
+    if not value:
+        return ""
+    result: list[str] = []
+    for part, encoding in decode_header(value):
+        if isinstance(part, bytes):
+            result.append(part.decode(encoding or "utf-8", errors="replace"))
+        else:
+            result.append(part)
+    return "".join(result)
+
+
+class OneCImapService:
+    """Read-only доступ к почтовой выгрузке 1С."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def _validate(self) -> None:
+        missing = []
+        if not self.settings.onec_imap_host:
+            missing.append("ONEC_IMAP_HOST")
+        if not self.settings.onec_imap_username:
+            missing.append("ONEC_IMAP_USERNAME")
+        if not self.settings.onec_imap_password:
+            missing.append("ONEC_IMAP_PASSWORD")
+        if not self.settings.onec_attachment_filename:
+            missing.append("ONEC_ATTACHMENT_FILENAME")
+        if missing:
+            raise RuntimeError(
+                "Не заполнены настройки получения выгрузки 1С: "
+                + ", ".join(missing)
+            )
+
+    def _connect(self):
+        self._validate()
+        client_cls = (
+            imaplib.IMAP4_SSL
+            if self.settings.onec_imap_ssl
+            else imaplib.IMAP4
+        )
+        client = client_cls(
+            self.settings.onec_imap_host,
+            self.settings.onec_imap_port,
+        )
+        client.login(
+            self.settings.onec_imap_username,
+            self.settings.onec_imap_password,
+        )
+        return client
+
+    def test_connection(self) -> str:
+        with self._connect() as imap:
+            status, _ = imap.select(
+                self.settings.onec_imap_folder,
+                readonly=True,
+            )
+            if status != "OK":
+                raise RuntimeError(
+                    f"Не удалось открыть папку "
+                    f"{self.settings.onec_imap_folder} в режиме readonly"
+                )
+
+        return (
+            "IMAP-подключение работает. Папка открыта в режиме только для чтения."
+        )
+
+    def find_latest_attachment(self) -> OneCAttachment:
+        with self._connect() as imap:
+            status, _ = imap.select(
+                self.settings.onec_imap_folder,
+                readonly=True,
+            )
+            if status != "OK":
+                raise RuntimeError(
+                    f"Не удалось открыть папку "
+                    f"{self.settings.onec_imap_folder} в режиме readonly"
+                )
+
+            since = (
+                datetime.now()
+                - timedelta(days=max(1, self.settings.onec_imap_lookback_days))
+            ).strftime("%d-%b-%Y")
+
+            criteria: list[str] = ["SINCE", since]
+            sender_filter = self.settings.onec_imap_from_contains.strip()
+            if sender_filter:
+                criteria.extend(["FROM", f'"{sender_filter}"'])
+
+            status, data = imap.uid("search", None, *criteria)
+            if status != "OK":
+                raise RuntimeError("Ошибка поиска письма по IMAP")
+
+            uids = data[0].split() if data and data[0] else []
+            if not uids:
+                raise FileNotFoundError(
+                    "Подходящие письма за заданный период не найдены"
+                )
+
+            expected = self.settings.onec_attachment_filename
+
+            for uid_bytes in reversed(uids):
+                uid = uid_bytes.decode()
+                # BODY.PEEK[] не помечает письмо прочитанным.
+                status, message_data = imap.uid(
+                    "fetch",
+                    uid,
+                    "(BODY.PEEK[])",
+                )
+                if status != "OK" or not message_data:
+                    continue
+
+                raw = None
+                for item in message_data:
+                    if isinstance(item, tuple) and isinstance(item[1], bytes):
+                        raw = item[1]
+                        break
+                if raw is None:
+                    continue
+
+                message = email.message_from_bytes(raw)
+                sender = decode_mime(message.get("From"))
+                subject = decode_mime(message.get("Subject"))
+                message_date = decode_mime(message.get("Date"))
+
+                for part in message.walk():
+                    filename = decode_mime(part.get_filename())
+                    if filename != expected:
+                        continue
+
+                    payload = part.get_payload(decode=True)
+                    if not payload:
+                        continue
+
+                    return OneCAttachment(
+                        uid=uid,
+                        message_date=message_date,
+                        sender=sender,
+                        subject=subject,
+                        filename=filename,
+                        file_hash=hashlib.sha256(payload).hexdigest(),
+                        payload=payload,
+                    )
+
+        raise FileNotFoundError(
+            f"В найденных письмах нет вложения {expected}"
+        )

@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "Регистрация учетных записей"
+    app_name: str = "Управление учетными записями"
     app_secret_key: str = "change-me-to-a-long-secret"
     app_base_url: str = "http://localhost:8000"
     app_timezone: str = "Asia/Almaty"
@@ -75,6 +75,24 @@ class Settings(BaseSettings):
     smtp_retry_attempts: int = 3
     smtp_retry_delay_seconds: float = 2.0
 
+    # Получение кадровой выгрузки 1С. На первом этапе настройки read-only:
+    # значения задаются через окружение/Portainer, Web только показывает их
+    # безопасную часть и запускает тесты/DRY_RUN-анализ.
+    onec_imap_host: str = ""
+    onec_imap_port: int = 993
+    onec_imap_ssl: bool = True
+    onec_imap_username: str = ""
+    onec_imap_password: str = ""
+    onec_imap_folder: str = "INBOX"
+    onec_imap_from_contains: str = "1c-robot@"
+    onec_imap_lookback_days: int = 3
+    onec_attachment_filename: str = "Штатные сотрудники - Телефонный справочник2 (XLSX).xlsx"
+    onec_header_search_rows: int = 20
+    onec_data_dir: str = "/app/data/onec"
+    # Отдельный HMAC-секрет можно задать позже. Пока при пустом значении
+    # используется APP_SECRET_KEY, чтобы импорт можно было запустить сразу.
+    onec_worker_hash_secret: str = ""
+
     mail_password_length: int = 16
     mail_password_specials: str = "!@#$%&?"
     ad_password_min_length: int = 8
@@ -116,6 +134,7 @@ class Settings(BaseSettings):
         if self.database_url.startswith("sqlite:///"):
             path = Path(self.database_url.removeprefix("sqlite:///"))
             path.parent.mkdir(parents=True, exist_ok=True)
+        Path(self.onec_data_dir).mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

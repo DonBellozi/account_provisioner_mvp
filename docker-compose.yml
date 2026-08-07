@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
 
     environment:
-      APP_NAME: "${APP_NAME:-Регистрация учетных записей}"
+      APP_NAME: "${APP_NAME:-Управление учетными записями}"
       APP_SECRET_KEY: "${APP_SECRET_KEY:-change-me-to-a-long-random-secret}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8081}"
       APP_TIMEZONE: "${APP_TIMEZONE:-Europe/Moscow}"
@@ -66,6 +66,19 @@ services:
       SMTP_TIMEOUT_SECONDS: "${SMTP_TIMEOUT_SECONDS:-20}"
       SMTP_RETRY_ATTEMPTS: "${SMTP_RETRY_ATTEMPTS:-3}"
       SMTP_RETRY_DELAY_SECONDS: "${SMTP_RETRY_DELAY_SECONDS:-2}"
+
+      ONEC_IMAP_HOST: "${ONEC_IMAP_HOST:-}"
+      ONEC_IMAP_PORT: "${ONEC_IMAP_PORT:-993}"
+      ONEC_IMAP_SSL: "${ONEC_IMAP_SSL:-true}"
+      ONEC_IMAP_USERNAME: "${ONEC_IMAP_USERNAME:-}"
+      ONEC_IMAP_PASSWORD: "${ONEC_IMAP_PASSWORD:-}"
+      ONEC_IMAP_FOLDER: "${ONEC_IMAP_FOLDER:-INBOX}"
+      ONEC_IMAP_FROM_CONTAINS: "${ONEC_IMAP_FROM_CONTAINS:-1c-robot@}"
+      ONEC_IMAP_LOOKBACK_DAYS: "${ONEC_IMAP_LOOKBACK_DAYS:-3}"
+      ONEC_ATTACHMENT_FILENAME: "${ONEC_ATTACHMENT_FILENAME:-Штатные сотрудники - Телефонный справочник2 (XLSX).xlsx}"
+      ONEC_HEADER_SEARCH_ROWS: "${ONEC_HEADER_SEARCH_ROWS:-20}"
+      ONEC_DATA_DIR: "${ONEC_DATA_DIR:-/app/data/onec}"
+      ONEC_WORKER_HASH_SECRET: "${ONEC_WORKER_HASH_SECRET:-}"
 
       MAIL_PASSWORD_LENGTH: "${MAIL_PASSWORD_LENGTH:-16}"
       MAIL_PASSWORD_SPECIALS: "${MAIL_PASSWORD_SPECIALS:-!@#$%&?}"

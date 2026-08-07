@@ -343,3 +343,142 @@
     margin-bottom: 8px;
   }
 }
+
+
+/* 1С: read-only получение и DRY_RUN-анализ */
+.integration-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.onec-safety-note {
+  margin: 16px 0 0;
+}
+.onec-result {
+  margin-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+}
+.onec-result:empty {
+  display: none;
+}
+.onec-result.checking,
+.onec-result.error {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 8px;
+}
+.onec-result.checking {
+  color: #1e40af;
+  background: #dbeafe;
+}
+.onec-result.error {
+  color: #991b1b;
+  background: #fee2e2;
+}
+.onec-report-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.onec-mail-details {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+.onec-stat-grid,
+.onec-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.onec-diff-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.onec-stat-grid > div,
+.onec-diff-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+.onec-stat-grid span,
+.onec-diff-grid span {
+  color: #64748b;
+  font-size: .86rem;
+}
+.onec-stat-grid strong,
+.onec-diff-grid strong {
+  font-size: 1.25rem;
+}
+.onec-dismissal-note {
+  margin-top: 14px;
+}
+.onec-report-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.onec-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+.onec-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: .82rem;
+}
+.onec-chip.warning {
+  background: #fef3c7;
+  color: #854d0e;
+}
+.onec-samples,
+.onec-headers {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.onec-samples summary,
+.onec-headers summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.onec-samples ul {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+.onec-samples li code,
+.onec-samples li span {
+  margin-left: 8px;
+}
+
+@media (max-width: 850px) {
+  .integration-card-actions {
+    justify-content: flex-start;
+  }
+  .onec-stat-grid,
+  .onec-diff-grid {
+    grid-template-columns: 1fr;
+  }
+  .onec-report-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
