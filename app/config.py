@@ -89,7 +89,6 @@ class Settings(BaseSettings):
     onec_attachment_filename: str = "Штатные сотрудники - Телефонный справочник2 (XLSX).xlsx"
     onec_header_search_rows: int = 20
     onec_data_dir: str = "/app/data/onec"
-    onec_source_domain: str = ""
     # Отдельный HMAC-секрет можно задать позже. Пока при пустом значении
     # используется APP_SECRET_KEY, чтобы импорт можно было запустить сразу.
     onec_worker_hash_secret: str = ""

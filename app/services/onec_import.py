@@ -5,18 +5,15 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config import Settings
-from sqlalchemy.orm import Session
 from app.services.onec_imap import OneCAttachment, OneCImapService
-from app.services.hr_registry import HRRegistryService
 from app.services.onec_xlsx import parse_onec_xlsx, worker_snapshot
 
 
 class OneCImportService:
     """Получение и анализ выгрузки 1С без внешних изменений."""
 
-    def __init__(self, settings: Settings, db: Session | None = None):
+    def __init__(self, settings: Settings):
         self.settings = settings
-        self.db = db
         self.data_dir = Path(settings.onec_data_dir)
         self.archive_dir = self.data_dir / "archive"
         self.current_file = self.data_dir / "current.xlsx"
@@ -102,6 +99,7 @@ class OneCImportService:
             "header_row": workbook.header_row,
             "headers": list(workbook.headers),
             "detected_columns": workbook.detected_columns,
+            "states": list(workbook.states),
             "potential_dismissal_columns": list(
                 workbook.potential_dismissal_columns
             ),
@@ -121,7 +119,6 @@ class OneCImportService:
                 previous_snapshot
             ),
             "hash_secret_source": self.hash_secret_source,
-            "registry": None,
             "dry_run": True,
             "external_actions": {
                 "ad": False,
@@ -130,9 +127,6 @@ class OneCImportService:
                 "itinvent": False,
             },
         }
-
-        if self.db is not None:
-            report["registry"] = HRRegistryService(self.settings, self.db).sync_and_reconcile(workbook)
 
         self.snapshot_file.write_text(
             json.dumps(
@@ -167,14 +161,7 @@ class OneCImportService:
         return data if isinstance(data, dict) else {}
 
     @staticmethod
-    def _meaningful_worker_snapshot(value: dict) -> dict:
-        placements=[{"department":str(p.get("department") or ""),"position":str(p.get("position") or "")} for p in (value.get("placements") or [])]
-        placements.sort(key=lambda item:(item["department"].casefold(),item["position"].casefold()))
-        return {"worker_key":value.get("worker_key") or "","fio":value.get("fio") or "","email":value.get("email") or None,"login":value.get("login") or None,"placements":placements}
-
-    @classmethod
     def _compare(
-        cls,
         previous: dict[str, dict],
         current: dict[str, dict],
     ) -> dict:
@@ -188,7 +175,7 @@ class OneCImportService:
         changed_keys = {
             key
             for key in common
-            if cls._meaningful_worker_snapshot(previous.get(key) or {}) != cls._meaningful_worker_snapshot(current.get(key) or {})
+            if previous.get(key) != current.get(key)
         }
 
         def samples(keys: set[str], source: dict[str, dict]) -> list[dict]:

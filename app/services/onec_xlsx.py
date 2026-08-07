@@ -18,6 +18,7 @@ DEFAULT_COLUMNS = {
     "fio": "Сотрудник.Физическое лицо.ФИО",
     "email": "Физическое лицо.Адрес электронной почты",
     "position": "Должность",
+    "state": "Состояние",
 }
 
 
@@ -25,6 +26,7 @@ DEFAULT_COLUMNS = {
 class OneCPlacement:
     department: str | None
     position: str | None
+    state: str | None
 
 
 @dataclass
@@ -55,6 +57,17 @@ class OneCWorkbook:
     @property
     def missing_email_count(self) -> int:
         return sum(1 for worker in self.workers if not worker.email)
+
+    @property
+    def states(self) -> tuple[str, ...]:
+        values = {
+            normalize_text(placement.state)
+            for worker in self.workers
+            for placement in worker.placements
+            if normalize_text(placement.state)
+        }
+        return tuple(sorted(values, key=str.casefold))
+
 
 def normalize_header(value: Any) -> str:
     return " ".join(str(value or "").replace("\n", " ").split()).strip().lower()
@@ -189,6 +202,7 @@ def _append_placement(
         updated = OneCPlacement(
             department=placement.department or item.department,
             position=placement.position or item.position,
+            state=placement.state or item.state,
         )
         return (*placements[:index], updated, *placements[index + 1 :])
     return (*placements, placement)
@@ -236,6 +250,7 @@ def parse_onec_xlsx(
         fio_col = mapping["fio"]
         email_col = mapping.get("email")
         position_col = mapping.get("position")
+        state_col = mapping.get("state")
 
         department_hierarchy: dict[int, str] = {}
         current_department: str | None = None
@@ -285,9 +300,16 @@ def parse_onec_xlsx(
                 if position_col
                 else ""
             ) or None
+            state = (
+                normalize_text(values[state_col - 1])
+                if state_col
+                else ""
+            ) or None
+
             placement = OneCPlacement(
                 department=current_department,
                 position=position,
+                state=state,
             )
             key = worker_key(snils, hash_secret)
             existing = merged.get(key)
