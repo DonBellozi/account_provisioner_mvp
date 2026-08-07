@@ -380,7 +380,7 @@ class ZimbraService:
         limit = max(20, min(len(address_to_login) * 2, 500))
         output = self._execute_zmprov_lookup(
             client,
-            ["sa", "-v", ldap_query, str(limit)],
+            ["sa", "-v", ldap_query, "limit", str(limit)],
             cancel_event=cancel_event,
         )
 
@@ -566,6 +566,7 @@ class ZimbraService:
                     "sa",
                     "-v",
                     ldap_query,
+                    "limit",
                     str(max(20, min(expected_count * 2, 500))),
                 ],
             )
