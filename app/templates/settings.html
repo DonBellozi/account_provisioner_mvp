@@ -131,6 +131,8 @@
                   id="onec-analyze-latest">
             Получить и проанализировать
           </button>
+          <button class="button secondary" type="button" id="onec-reconcile">Пересверить AD/Zimbra</button>
+          <a class="button secondary" href="/employees/registry">Открыть реестр</a>
         </div>
       </div>
 
@@ -143,6 +145,7 @@
         <dt>Папка</dt><dd>{{ integrations.onec.folder }}</dd>
         <dt>Фильтр отправителя</dt><dd>{{ integrations.onec.sender }}</dd>
         <dt>Глубина поиска</dt><dd>{{ integrations.onec.lookback }}</dd>
+        <dt>Кадровый источник</dt><dd>{{ integrations.onec.source_name }} <code>{{ integrations.onec.source_id }}</code></dd>
         <dt>Имя вложения</dt><dd>{{ integrations.onec.filename }}</dd>
         <dt>Каталог данных</dt><dd><code>{{ integrations.onec.data_dir }}</code></dd>
         <dt>HMAC-ключ идентификации</dt><dd>{{ integrations.onec.hash_secret }}</dd>
@@ -155,6 +158,7 @@
       </div>
 
       <div class="integration-test-result" id="integration-result-onec"></div>
+      {% if onec_registry_summary.total %}<div class="onec-registry-summary"><strong>Кадровый реестр</strong><div class="onec-diff-grid"><div><span>Работников</span><strong>{{ onec_registry_summary.total }}</strong></div><div><span>Соответствует</span><strong>{{ onec_registry_summary.ok }}</strong></div><div><span>Требует проверки</span><strong>{{ onec_registry_summary.issues + onec_registry_summary.errors }}</strong></div></div></div>{% endif %}
       <div class="onec-result" id="onec-result">
         {% if onec_last_report %}
         <div class="onec-report-heading">
@@ -310,9 +314,6 @@
     const headers = (report.headers || [])
       .map(value => `<span class="onec-chip">${escapeHtml(value)}</span>`)
       .join('');
-    const states = (report.states || [])
-      .map(value => `<span class="onec-chip">${escapeHtml(value)}</span>`)
-      .join('') || '<span class="muted">Не обнаружены</span>';
     const dismissalColumns = (report.potential_dismissal_columns || [])
       .map(value => `<span class="onec-chip warning">${escapeHtml(value)}</span>`)
       .join('') || '<span class="muted">Не обнаружены</span>';
@@ -338,6 +339,8 @@
         <div><span>Изменились</span><strong>${comparison.changed_workers ?? 0}</strong></div>
       </div>
 
+      ${report.registry?.reconciliation ? `<div class="onec-report-section"><strong>Сверка 1С / AD / Zimbra</strong><div class="onec-stat-grid"><div><span>В реестре</span><strong>${report.registry.reconciliation.total ?? 0}</strong></div><div><span>Соответствует</span><strong>${report.registry.reconciliation.ok ?? 0}</strong></div><div><span>Требует проверки</span><strong>${report.registry.reconciliation.issues ?? 0}</strong></div><div><span>Ошибки</span><strong>${report.registry.reconciliation.errors ?? 0}</strong></div></div></div>` : ''}
+
       <div class="alert warning onec-dismissal-note">
         ${escapeHtml(report.dismissal_note || '')}
       </div>
@@ -348,11 +351,6 @@
       ${renderSamples('Новые работники', comparison.new_samples)}
       ${renderSamples('Исчезли из текущей выгрузки', comparison.missing_samples)}
       ${renderSamples('Изменившиеся работники', comparison.changed_samples)}
-
-      <div class="onec-report-section">
-        <strong>Состояния из 1С</strong>
-        <div class="onec-chip-list">${states}</div>
-      </div>
 
       <div class="onec-report-section">
         <strong>Поля, похожие на дату/признак увольнения</strong>
@@ -424,6 +422,15 @@
         'Анализирую...'
       );
       renderOnecReport(payload.report || {});
+    } catch (_) {}
+  });
+
+
+  document.getElementById('onec-reconcile')?.addEventListener('click', async event => {
+    try {
+      const payload = await postOnec('/settings/onec/reconcile', event.currentTarget, 'Сверяю...');
+      const summary = payload.summary || {};
+      document.getElementById('onec-result').innerHTML = `<div class="onec-report-heading"><strong>Сверка завершена</strong></div><div class="onec-stat-grid"><div><span>В реестре</span><strong>${summary.total ?? 0}</strong></div><div><span>Соответствует</span><strong>${summary.ok ?? 0}</strong></div><div><span>Требует проверки</span><strong>${summary.issues ?? 0}</strong></div><div><span>Ошибки</span><strong>${summary.errors ?? 0}</strong></div></div><p class="muted">Учетные записи не изменялись.</p>`;
     } catch (_) {}
   });
 

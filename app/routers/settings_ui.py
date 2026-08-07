@@ -7,11 +7,14 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings, get_settings
+from app.db import get_db
 from app.security import get_or_create_csrf, require_admin, validate_csrf
 from app.services.ad import ActiveDirectoryService
+from app.services.hr_registry import HRRegistryService
 from app.services.mailer import CredentialMailer
 from app.services.onec_import import OneCImportService
 from app.services.zimbra import ZimbraService
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -129,6 +132,8 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
                 if settings.onec_worker_hash_secret.strip()
                 else "APP_SECRET_KEY (временно)"
             ),
+            "source_id": settings.onec_source_id,
+            "source_name": settings.onec_source_name,
         },
     }
 
@@ -137,9 +142,11 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
 def settings_overview(
     request: Request,
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     current = require_admin(request)
-    onec_service = OneCImportService(settings)
+    onec_service = OneCImportService(settings, db)
+    registry = HRRegistryService(settings, db)
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -148,6 +155,7 @@ def settings_overview(
             "csrf": get_or_create_csrf(request),
             "integrations": _integration_overview(settings),
             "onec_last_report": onec_service.load_last_report(),
+            "onec_registry_summary": registry.summary(),
         },
     )
 
@@ -210,15 +218,25 @@ def onec_analyze_latest(
     request: Request,
     csrf: str = Form(...),
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     validate_csrf(request, csrf)
     require_admin(request)
 
     try:
-        report = OneCImportService(settings).analyze_latest()
+        report = OneCImportService(settings, db).analyze_latest()
         return {"ok": True, "report": report}
     except Exception as exc:
         return JSONResponse(
             {"ok": False, "error": str(exc)},
             status_code=503,
         )
+
+
+@router.post("/settings/onec/reconcile")
+def onec_reconcile(request: Request, csrf: str = Form(...), settings: Settings = Depends(get_settings), db: Session = Depends(get_db)):
+    validate_csrf(request, csrf); require_admin(request)
+    try:
+        return {"ok": True, "summary": HRRegistryService(settings, db).reconcile_current()}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)

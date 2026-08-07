@@ -469,6 +469,50 @@ class ZimbraService:
                 return False
             raise
 
+    def addresses_exist(self, emails: list[str]) -> set[str]:
+        """Найти точные адреса/алиасы Zimbra батчами, без изменений."""
+        if not self.settings.zimbra_check_enabled:
+            return set()
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+        normalized = list(dict.fromkeys(email.strip().lower() for email in emails if email.strip() and "@" in email))
+        if not normalized:
+            return set()
+        existing: set[str] = set()
+        client = self._client()
+        try:
+            for offset in range(0, len(normalized), 100):
+                chunk = normalized[offset:offset + 100]
+                wanted = set(chunk)
+                clauses=[]
+                for address in chunk:
+                    escaped=self._escape_ldap_filter_value(address)
+                    clauses.extend([f"(mail={escaped})",f"(zimbraMailAlias={escaped})",f"(zimbraMailDeliveryAddress={escaped})"])
+                query=f"(|{''.join(clauses)})"
+                try:
+                    output=self._execute_zmprov_lookup(client,["sa","-v",query,str(max(20,len(chunk)*2))])
+                    interesting={"mail","zimbramailalias","zimbramaildeliveryaddress","name"}
+                    for raw_line in output.splitlines():
+                        line=raw_line.strip()
+                        if not line: continue
+                        value=""
+                        if line.lower().startswith("# name "): value=line[7:].strip()
+                        elif ":" in line:
+                            attribute,candidate=line.split(":",1)
+                            if attribute.strip().lower() in interesting: value=candidate.strip()
+                        value=value.lower()
+                        if value in wanted: existing.add(value)
+                except RuntimeError:
+                    for address in chunk:
+                        try:
+                            self._execute_zmprov_lookup(client,["ga",address,"zimbraId"]); existing.add(address)
+                        except RuntimeError as exc:
+                            if self._is_not_found_error(exc): continue
+                            raise
+        finally:
+            client.close()
+        return existing
+
     def logins_exist_any_domain(
         self,
         logins: list[str],

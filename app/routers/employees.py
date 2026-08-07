@@ -16,6 +16,7 @@ from app.db import get_db
 from app.models import AuditLog, DismissalSchedule, ProvisioningOperation
 from app.security import get_current_user, get_or_create_csrf, validate_csrf
 from app.services.ad import ActiveDirectoryService
+from app.services.hr_registry import HRRegistryService
 from app.services.names import build_login_candidates, parse_two_line_input, validate_person_name
 from app.services.provisioning import ProvisioningInput, ProvisioningService
 from app.services.zimbra import BackgroundLoginCheckCancelled, ZimbraService
@@ -224,6 +225,10 @@ def dashboard(
         )
     )
 
+    registry_service = HRRegistryService(settings, db)
+    registry_summary = registry_service.summary()
+    registry_issues = registry_service.list_rows(status="issues", limit=10)
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -231,13 +236,23 @@ def dashboard(
             request,
             journal_items=journal_items,
             upcoming_dismissals=upcoming_dismissals,
+            registry_summary=registry_summary,
+            registry_issues=registry_issues,
             dry_run=settings.dry_run,
         ),
     )
 
 
+@router.get("/employees/registry")
+def employee_registry(request: Request, q: str = "", status: str = "all", db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    get_current_user(request)
+    if status not in {"all", "issues", "ok", "not_checked"}: status = "all"
+    service = HRRegistryService(settings, db)
+    return templates.TemplateResponse(request, "hr_registry.html", _context(request, rows=service.list_rows(query=q, status=status, limit=1000), summary=service.summary(), query=q, selected_status=status))
+
+
 @router.get("/employees/new")
-def new_employee(request: Request, settings: Settings = Depends(get_settings)):
+def new_employee(request: Request, fio: str = "", settings: Settings = Depends(get_settings)):
     return templates.TemplateResponse(
         request,
         "employee_form.html",
@@ -247,7 +262,7 @@ def new_employee(request: Request, settings: Settings = Depends(get_settings)):
             parsed=None,
             candidates=[],
             error="",
-            raw_input="",
+            raw_input=fio.strip(),
             domain_mode=settings.zimbra_domain_mode,
         ),
     )

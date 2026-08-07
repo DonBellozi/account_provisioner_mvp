@@ -2,22 +2,17 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from enum import StrEnum
-
-from sqlalchemy import Boolean, Date, DateTime, Enum, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
-
 from app.db import Base
-
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
 
 class UserRole(StrEnum):
     ADMIN = "admin"
     OPERATOR = "operator"
     VIEWER = "viewer"
-
 
 class OperationStatus(StrEnum):
     DRAFT = "draft"
@@ -26,10 +21,8 @@ class OperationStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
 
-
 class LocalUser(Base):
     __tablename__ = "local_users"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(512))
@@ -37,12 +30,8 @@ class LocalUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-
 class DomainAccessUser(Base):
-    """Явно разрешенный доменный пользователь и его роль в приложении."""
-
     __tablename__ = "domain_access_users"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(256), default="")
@@ -51,18 +40,10 @@ class DomainAccessUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=utcnow,
-        onupdate=utcnow,
-    )
-
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 class DomainMailProfile(Base):
-    """Почтовый отправитель и два шаблона для конкретного домена."""
-
     __tablename__ = "domain_mail_profiles"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     domain: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     sender_name: Mapped[str] = mapped_column(String(256), default="")
@@ -73,16 +54,10 @@ class DomainMailProfile(Base):
     corporate_body_html: Mapped[str] = mapped_column(Text)
     updated_by: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=utcnow,
-        onupdate=utcnow,
-    )
-
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 class ProvisioningOperation(Base):
     __tablename__ = "provisioning_operations"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     operator_username: Mapped[str] = mapped_column(String(256), index=True)
     last_name: Mapped[str] = mapped_column(String(128))
@@ -102,10 +77,8 @@ class ProvisioningOperation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-
 class DismissalSchedule(Base):
     __tablename__ = "dismissal_schedules"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     login: Mapped[str] = mapped_column(String(64), index=True)
     corporate_email: Mapped[str] = mapped_column(String(320), index=True)
@@ -116,10 +89,8 @@ class DismissalSchedule(Base):
     error_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-
 class AuditLog(Base):
     __tablename__ = "audit_log"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     actor: Mapped[str] = mapped_column(String(256), index=True)
     action: Mapped[str] = mapped_column(String(128), index=True)
@@ -127,3 +98,33 @@ class AuditLog(Base):
     result: Mapped[str] = mapped_column(String(64), default="success")
     details: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class HRPerson(Base):
+    """Глобальная карточка человека. СНИЛС в БД не хранится: только HMAC worker_key."""
+    __tablename__ = "hr_people"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    worker_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    fio: Mapped[str] = mapped_column(String(512), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class HRSourceRecord(Base):
+    """Состояние человека в конкретном кадровом источнике/организации."""
+    __tablename__ = "hr_source_records"
+    __table_args__ = (UniqueConstraint("worker_key", "source_id", name="uq_hr_source_worker"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    worker_key: Mapped[str] = mapped_column(String(64), index=True)
+    source_id: Mapped[str] = mapped_column(String(128), index=True)
+    source_name: Mapped[str] = mapped_column(String(256), default="")
+    fio: Mapped[str] = mapped_column(String(512), index=True)
+    corporate_email: Mapped[str] = mapped_column(String(320), default="", index=True)
+    login: Mapped[str] = mapped_column(String(128), default="", index=True)
+    placements_json: Mapped[str] = mapped_column(Text, default="[]")
+    is_present: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ad_status: Mapped[str] = mapped_column(String(32), default="not_checked", index=True)
+    zimbra_status: Mapped[str] = mapped_column(String(32), default="not_checked", index=True)
+    reconciliation_status: Mapped[str] = mapped_column(String(32), default="not_checked", index=True)
+    reconciliation_error: Mapped[str] = mapped_column(Text, default="")
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

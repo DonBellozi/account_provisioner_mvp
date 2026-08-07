@@ -254,6 +254,25 @@ class ActiveDirectoryService:
         normalized = login.strip().lower()
         return normalized in self.logins_exist([normalized])
 
+    def users_by_logins(self, logins: list[str]) -> dict[str, ADDirectoryUser]:
+        """Получить карточки AD для набора логинов одним подключением."""
+        if not self.settings.ad_check_enabled:
+            return {}
+        normalized = list(dict.fromkeys(login.strip().lower() for login in logins if login.strip()))
+        if not normalized:
+            return {}
+        result: dict[str, ADDirectoryUser] = {}
+        with self._service_connection() as conn:
+            for offset in range(0, len(normalized), 200):
+                chunk = normalized[offset:offset + 200]
+                alternatives = "".join(f"(sAMAccountName={escape_filter_chars(login)})" for login in chunk)
+                conn.search(self.settings.ad_base_dn, f"(&(objectCategory=person)(objectClass=user)(|{alternatives}))", attributes=["sAMAccountName","displayName","mail","userAccountControl","distinguishedName"], size_limit=len(chunk))
+                for entry in conn.entries:
+                    user = self._entry_to_directory_user(entry)
+                    if user is not None:
+                        result[user.username] = user
+        return result
+
 
     def create_disabled_user(
         self,
