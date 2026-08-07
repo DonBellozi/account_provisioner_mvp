@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     onec_header_search_rows: int = 20
     onec_data_dir: str = "/app/data/onec"
     onec_source_domain: str = ""
+
+    # Автоматический импорт кадровой выгрузки. При запуске приложения
+    # выполняется catch-up: новый файл будет обработан сразу, даже если
+    # сервер был выключен в плановое время.
+    onec_auto_import_enabled: bool = True
+    onec_auto_import_time: str = "09:00"
+    onec_auto_import_startup_catchup: bool = True
+
     # Отдельный HMAC-секрет можно задать позже. Пока при пустом значении
     # используется APP_SECRET_KEY, чтобы импорт можно было запустить сразу.
     onec_worker_hash_secret: str = ""
@@ -115,6 +123,22 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(";") if item.strip()]
         return value
+
+    @field_validator("onec_auto_import_time")
+    @classmethod
+    def validate_onec_auto_import_time(cls, value: str) -> str:
+        text = str(value or "").strip()
+        match = __import__("re").fullmatch(r"(\d{2}):(\d{2})", text)
+        if not match:
+            raise ValueError(
+                "ONEC_AUTO_IMPORT_TIME должен быть в формате HH:MM"
+            )
+        hour, minute = (int(part) for part in match.groups())
+        if hour > 23 or minute > 59:
+            raise ValueError(
+                "ONEC_AUTO_IMPORT_TIME содержит недопустимое время"
+            )
+        return f"{hour:02d}:{minute:02d}"
 
     @field_validator("app_secret_key")
     @classmethod

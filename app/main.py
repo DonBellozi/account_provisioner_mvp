@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.routers import admin, auth, employees, settings_ui
 from app.security import CSRFMismatchError, ensure_bootstrap_admin
+from app.services.onec_scheduler import OneCAutoImportScheduler
 
 settings = get_settings()
 
@@ -22,7 +23,13 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         ensure_bootstrap_admin(db, settings)
-    yield
+
+    onec_scheduler = OneCAutoImportScheduler(settings, SessionLocal)
+    onec_scheduler.start()
+    try:
+        yield
+    finally:
+        onec_scheduler.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

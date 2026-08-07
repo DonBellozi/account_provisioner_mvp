@@ -160,6 +160,47 @@ class HRSourceRecord(Base):
     reconciliation_error: Mapped[str] = mapped_column(Text, default="")
     reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+class OneCImportRun(Base):
+    """История получения и обработки кадровой выгрузки 1С."""
+
+    __tablename__ = "onec_import_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trigger: Mapped[str] = mapped_column(String(32), default="manual", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    source_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+
+    mail_uid: Mapped[str] = mapped_column(String(128), default="")
+    message_date: Mapped[str] = mapped_column(String(256), default="")
+    sender: Mapped[str] = mapped_column(String(512), default="")
+    subject: Mapped[str] = mapped_column(String(1024), default="")
+    filename: Mapped[str] = mapped_column(String(512), default="")
+    file_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    archive_filename: Mapped[str] = mapped_column(String(768), default="")
+
+    workers_count: Mapped[int] = mapped_column(Integer, default=0)
+    placements_count: Mapped[int] = mapped_column(Integer, default=0)
+    new_workers: Mapped[int] = mapped_column(Integer, default=0)
+    missing_workers: Mapped[int] = mapped_column(Integer, default=0)
+    changed_workers: Mapped[int] = mapped_column(Integer, default=0)
+
+    registry_ok: Mapped[int] = mapped_column(Integer, default=0)
+    registry_issues: Mapped[int] = mapped_column(Integer, default=0)
+    registry_errors: Mapped[int] = mapped_column(Integer, default=0)
+
+    message: Mapped[str] = mapped_column(Text, default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        index=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
 class EmailLoginMapping(Base):
     """Явное сопоставление кадрового работника, AD и Zimbra.
 

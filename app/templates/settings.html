@@ -147,15 +147,20 @@
         <dt>Фильтр отправителя</dt><dd>{{ integrations.onec.sender }}</dd>
         <dt>Глубина поиска</dt><dd>{{ integrations.onec.lookback }}</dd>
         <dt>Домен выгрузки 1С</dt><dd><code>{{ integrations.onec.source_domain }}</code></dd>
+        <dt>Автоматический импорт</dt><dd><strong>{{ integrations.onec.auto_import }}</strong></dd>
+        <dt>Время автоимпорта</dt><dd>{{ integrations.onec.auto_import_time }} ({{ integrations.onec.auto_import_timezone }})</dd>
+        <dt>Catch-up после запуска</dt><dd>{{ integrations.onec.startup_catchup }}</dd>
+        <dt>Следующий плановый запуск</dt><dd>{{ onec_schedule.next_run }}</dd>
         <dt>Имя вложения</dt><dd>{{ integrations.onec.filename }}</dd>
         <dt>Каталог данных</dt><dd><code>{{ integrations.onec.data_dir }}</code></dd>
         <dt>HMAC-ключ идентификации</dt><dd>{{ integrations.onec.hash_secret }}</dd>
       </dl>
 
       <div class="alert warning onec-safety-note">
-        Первый этап работает только как наблюдатель: письмо читается через IMAP
-        в режиме readonly, XLSX анализируется локально. Изменения AD, Zimbra,
-        отправка писем и действия в IT Invent не выполняются.
+        Импорт читает почту через IMAP в режиме readonly и обновляет только
+        локальный кадровый реестр и историю. AD и Zimbra используются для
+        проверки; учетные записи, почта и IT Invent автоматически не изменяются.
+        Один и тот же XLSX повторно не обрабатывается по SHA-256.
       </div>
 
       <div class="integration-test-result" id="integration-result-onec"></div>
@@ -173,6 +178,71 @@
           <div><span>Без email</span><strong>{{ onec_last_report.missing_email_count }}</strong></div>
         </div>
         <div class="onec-dismissal-note">{{ onec_last_report.dismissal_note }}</div>
+        {% endif %}
+      </div>
+
+      <div class="onec-history">
+        <div class="onec-report-heading">
+          <strong>История импорта</strong>
+          <span class="muted">Последние {{ onec_import_history|length }} запусков</span>
+        </div>
+        {% if onec_import_history %}
+        <div class="table-wrap onec-history-table-wrap">
+          <table class="journal-table onec-history-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Запуск</th>
+                <th>Статус</th>
+                <th>Работников</th>
+                <th>Изменения</th>
+                <th>SHA-256</th>
+                <th>Подробности</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in onec_import_history %}
+              <tr>
+                <td class="journal-date">
+                  {{ item.started_at.strftime('%d.%m.%Y') }}
+                  <span>{{ item.started_at.strftime('%H:%M:%S') }}</span>
+                </td>
+                <td>{{ item.trigger_label }}</td>
+                <td>
+                  <span class="status {{ 'success' if item.status in ['success', 'duplicate'] else 'partial' if item.status == 'partial' else 'failed' if item.status == 'failed' else 'running' }}">
+                    {{ item.status_label }}
+                  </span>
+                </td>
+                <td>{{ item.workers_count if item.workers_count else '–' }}</td>
+                <td class="onec-history-diff">
+                  {% if item.status in ['success', 'partial'] %}
+                    <span>+{{ item.new_workers }}</span>
+                    <span>−{{ item.missing_workers }}</span>
+                    <span>Δ{{ item.changed_workers }}</span>
+                  {% else %}
+                    –
+                  {% endif %}
+                </td>
+                <td>{% if item.hash_short %}<code>{{ item.hash_short }}…</code>{% else %}–{% endif %}</td>
+                <td>
+                  {% if item.error_message %}
+                  <details>
+                    <summary>Ошибка</summary>
+                    <div class="registry-error">{{ item.error_message }}</div>
+                  </details>
+                  {% elif item.message %}
+                  <span class="muted">{{ item.message }}</span>
+                  {% else %}
+                  –
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="muted">История появится после первого ручного или автоматического запуска.</p>
         {% endif %}
       </div>
     </article>
@@ -319,9 +389,18 @@
       .map(value => `<span class="onec-chip warning">${escapeHtml(value)}</span>`)
       .join('') || '<span class="muted">Не обнаружены</span>';
 
+    const importNotice = report.import_status === 'duplicate'
+      ? `<div class="alert success">${escapeHtml(report.import_message || 'Файл уже обработан.')}</div>`
+      : report.import_status === 'partial'
+        ? `<div class="alert warning">${escapeHtml(report.import_message || 'Выгрузка принята с предупреждением.')}</div>`
+        : report.import_message
+          ? `<div class="alert success">${escapeHtml(report.import_message)}</div>`
+          : '';
+
     target.innerHTML = `
+      ${importNotice}
       <div class="onec-report-heading">
-        <strong>Результат DRY_RUN-анализа</strong>
+        <strong>Результат анализа кадровой выгрузки</strong>
         <span class="muted">${escapeHtml(report.analyzed_at || '')}</span>
       </div>
 
@@ -423,6 +502,7 @@
         'Анализирую...'
       );
       renderOnecReport(payload.report || {});
+      window.setTimeout(() => window.location.reload(), 1800);
     } catch (_) {}
   });
 

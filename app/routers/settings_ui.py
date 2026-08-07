@@ -15,6 +15,7 @@ from app.services.email_login_mapping import EmailLoginMappingService
 from app.services.hr_registry import HRRegistryService
 from app.services.mailer import CredentialMailer
 from app.services.onec_import import OneCImportService
+from app.services.onec_scheduler import schedule_info
 from app.services.zimbra import ZimbraService
 from sqlalchemy.orm import Session
 
@@ -138,6 +139,16 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
                 settings.onec_source_domain.strip().lower()
                 or "автоматически по e-mail выгрузки"
             ),
+            "auto_import": (
+                "Включен"
+                if settings.onec_auto_import_enabled
+                else "Отключен"
+            ),
+            "auto_import_time": settings.onec_auto_import_time,
+            "auto_import_timezone": settings.app_timezone,
+            "startup_catchup": _yes_no(
+                settings.onec_auto_import_startup_catchup
+            ),
         },
     }
 
@@ -165,6 +176,8 @@ def settings_overview(
             "integrations": integrations,
             "onec_last_report": onec_service.load_last_report(),
             "onec_registry_summary": registry_summary,
+            "onec_import_history": onec_service.history(limit=20),
+            "onec_schedule": schedule_info(settings),
         },
     )
 
@@ -233,7 +246,10 @@ def onec_analyze_latest(
     require_admin(request)
 
     try:
-        report = OneCImportService(settings, db).analyze_latest()
+        report = OneCImportService(
+            settings,
+            db,
+        ).analyze_latest(trigger="manual")
         return {"ok": True, "report": report}
     except Exception as exc:
         return JSONResponse(

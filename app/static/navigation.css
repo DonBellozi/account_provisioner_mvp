@@ -697,3 +697,28 @@
     text-align: center;
   }
 }
+
+
+/* История автоматического импорта 1С */
+.onec-history {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.onec-history-table-wrap {
+  margin-top: 10px;
+}
+
+.onec-history-table {
+  min-width: 920px;
+}
+
+.onec-history-diff {
+  white-space: nowrap;
+}
+
+.onec-history-diff span {
+  display: inline-block;
+  margin-right: 6px;
+}
