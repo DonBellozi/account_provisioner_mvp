@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Настройки</h1>
+    <p class="muted settings-lead">
+      Служебные разделы и параметры интеграций собраны в одном месте.
+    </p>
+  </div>
+</div>
+
+<section class="settings-section">
+  <h2>Доступ и уведомления</h2>
+  <div class="settings-grid">
+    <a class="settings-card-link" href="/admin/access">
+      <span class="settings-card-title">Доступ</span>
+      <span class="settings-card-description">
+        Доменные пользователи, роли операторов и администраторов.
+      </span>
+      <span class="settings-card-action">Открыть →</span>
+    </a>
+
+    <a class="settings-card-link" href="/admin/mail-templates">
+      <span class="settings-card-title">Шаблоны писем</span>
+      <span class="settings-card-description">
+        Отправители и шаблоны писем с реквизитами для почты и AD.
+      </span>
+      <span class="settings-card-action">Открыть →</span>
+    </a>
+  </div>
+</section>
+
+<section class="settings-section">
+  <h2>Интеграции</h2>
+  <div class="settings-grid">
+    <div class="settings-card-placeholder">
+      <span class="settings-card-title">Active Directory</span>
+      <span class="settings-card-description">
+        Подключение, OU, параметры создания и проверки учетных записей.
+      </span>
+      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
+    </div>
+
+    <div class="settings-card-placeholder">
+      <span class="settings-card-title">Zimbra</span>
+      <span class="settings-card-description">
+        SSH-подключение, домены, алиасы и параметры создания почтовых ящиков.
+      </span>
+      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
+    </div>
+
+    <div class="settings-card-placeholder">
+      <span class="settings-card-title">SMTP</span>
+      <span class="settings-card-description">
+        Сервер исходящей почты и техническая учетная запись отправителя.
+      </span>
+      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
+    </div>
+
+    <div class="settings-card-placeholder">
+      <span class="settings-card-title">1С / кадровая выгрузка</span>
+      <span class="settings-card-description">
+        IMAP, отправитель, имя XLSX и параметры безопасного импорта.
+      </span>
+      <span class="settings-card-state">Следующий этап</span>
+    </div>
+
+    <div class="settings-card-placeholder">
+      <span class="settings-card-title">IT Invent</span>
+      <span class="settings-card-description">
+        Проверка оборудования, числящегося за увольняемым работником.
+      </span>
+      <span class="settings-card-state">Запланировано</span>
+    </div>
+  </div>
+</section>
+{% endblock %}

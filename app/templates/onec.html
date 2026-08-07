@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}1С – кадровая выгрузка{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>1С – кадровая выгрузка</h1>
+    <p class="muted settings-lead">
+      Контур получения и анализа кадровой выгрузки.
+    </p>
+  </div>
+  <span class="dry-run-badge">DRY RUN</span>
+</div>
+
+<div class="alert warning">
+  Подсистема 1С пока работает только в режиме наблюдения.
+  Она не будет изменять Active Directory, Zimbra, отправлять письма
+  или запускать действия по увольнению.
+</div>
+
+<section class="card">
+  <h2>Текущий этап</h2>
+  <div class="onec-flow">
+    <div class="onec-step ready">
+      <strong>1. Источник XLSX</strong>
+      <span>Используем ту же кадровую выгрузку, что и invite-mailer.</span>
+    </div>
+    <div class="onec-step next">
+      <strong>2. Получение из почты</strong>
+      <span>Следующим патчем подключим поиск письма и скачивание XLSX по IMAP.</span>
+    </div>
+    <div class="onec-step">
+      <strong>3. Анализ</strong>
+      <span>СНИЛС, ФИО, email, должности, состояния и кадровые назначения.</span>
+    </div>
+    <div class="onec-step">
+      <strong>4. Сравнение</strong>
+      <span>Покажем, какие действия система предложила бы выполнить.</span>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Безопасный режим</h2>
+  <div class="state-grid">
+    <span>Изменения AD</span><strong>Отключены</strong>
+    <span>Изменения Zimbra</span><strong>Отключены</strong>
+    <span>Письма работникам</span><strong>Отключены</strong>
+    <span>IT Invent</span><strong>Только будущая проверка</strong>
+  </div>
+</section>
+{% endblock %}
