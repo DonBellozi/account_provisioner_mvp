@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Создание учетной записи AD{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Создание учетной записи Active Directory</h1>
+    <p class="muted">
+      Существующий почтовый ящик Zimbra не изменяется. Логин AD берется
+      строго из части e-mail до символа @.
+    </p>
+  </div>
+  <a class="button secondary" href="/employees/registry">Назад в реестр</a>
+</div>
+
+{% if dry_run %}
+<div class="alert warning">
+  Включен DRY_RUN – реальные изменения в AD и отправка письма выполняться не будут.
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert error">{{ error }}</div>
+{% endif %}
+
+{% if preflight %}
+<section class="card ad-only-summary">
+  <h2>Работник</h2>
+  <div class="credential-row"><span>ФИО</span><strong>{{ preflight.full_name }}</strong></div>
+  <div class="credential-row"><span>Существующий e-mail</span><code>{{ preflight.corporate_email }}</code></div>
+  <div class="credential-row"><span>Логин AD</span><code>{{ preflight.login }}</code></div>
+  <div class="credential-row"><span>Ящик Zimbra</span><span>{{ preflight.zimbra_primary_email }}</span></div>
+</section>
+
+<div class="alert warning ad-only-safety">
+  Будет создана только учетная запись Active Directory. Для нее будут применены
+  те же параметры, что и в разделе «Создание»: атрибуты ФИО и mail, настроенные
+  группы, действующие правила пароля, бессрочный пароль согласно текущей
+  настройке и последующее включение учетной записи. После создания реквизиты AD
+  будут отправлены на <strong>{{ preflight.corporate_email }}</strong>.
+</div>
+
+{% if preflight.block_reason %}
+<div class="alert error">
+  <strong>Создание заблокировано.</strong><br>
+  {{ preflight.block_reason }}
+</div>
+{% endif %}
+
+{% if preflight.exact_matches %}
+<section class="card">
+  <h2>Учетная запись уже найдена</h2>
+  <p class="muted">
+    Эти совпадения найдены по точному логину или корпоративному e-mail.
+    Новую учетную запись создавать нельзя – используйте сопоставление.
+  </p>
+  <div class="ad-candidate-list">
+    {% for candidate in preflight.exact_matches %}
+    <div class="ad-candidate-row">
+      <div>
+        <strong>{{ candidate.display_name or candidate.username }}</strong>
+        <div class="journal-object-meta">
+          <code>{{ candidate.username }}</code>
+          {% if candidate.email %}<span>{{ candidate.email }}</span>{% endif %}
+          <span>{{ 'включена' if candidate.is_enabled else 'отключена' }}</span>
+        </div>
+      </div>
+      <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if preflight.name_candidates and preflight.can_create %}
+<section class="card">
+  <h2>Возможные совпадения по ФИО</h2>
+  <p class="muted">
+    Формат старых displayName может отличаться: ФИО, ИОФ, «Фамилия Имя О.»,
+    «Имя О. Фамилия» и другие варианты. Совпадения ниже не считаются
+    подтвержденными автоматически.
+  </p>
+  <div class="ad-candidate-list">
+    {% for candidate in preflight.name_candidates %}
+    <div class="ad-candidate-row">
+      <div>
+        <strong>{{ candidate.display_name or candidate.username }}</strong>
+        <div class="journal-object-meta">
+          <code>{{ candidate.username }}</code>
+          {% if candidate.email %}<span>{{ candidate.email }}</span>{% endif %}
+          <span>{{ 'включена' if candidate.is_enabled else 'отключена' }}</span>
+        </div>
+      </div>
+      <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if preflight.can_create %}
+<form method="post" action="/employees/registry/{{ preflight.record_id }}/create-ad" class="card ad-only-create-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if preflight.name_candidates %}
+  <label class="check-row ad-only-confirm-check">
+    <input type="checkbox" name="confirm_name_candidates" value="true" required>
+    <span>
+      Подтверждаю, что найденные по ФИО учетные записи относятся к другим людям,
+      и для {{ preflight.full_name }} необходимо создать новую учетную запись AD.
+    </span>
+  </label>
+  {% else %}
+  <input type="hidden" name="confirm_name_candidates" value="false">
+  {% endif %}
+
+  <div class="actions ad-only-actions">
+    <button class="button" type="submit">Создать AD</button>
+    <a class="button secondary" href="/employees/registry">Отмена</a>
+  </div>
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

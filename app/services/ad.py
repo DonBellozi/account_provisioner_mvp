@@ -233,6 +233,54 @@ class ActiveDirectoryService:
                 return None
             return self._entry_to_directory_user(conn.entries[0])
 
+    def users_by_email(self, email: str, limit: int = 10) -> list[ADDirectoryUser]:
+        """Найти существующие AD-учетки по точному корпоративному e-mail.
+
+        Проверяем как основной атрибут mail, так и proxyAddresses, потому что
+        старые учетные записи могли заполняться по-разному.
+        """
+        normalized = str(email or "").strip().lower()
+        if not normalized or "@" not in normalized:
+            return []
+
+        safe = escape_filter_chars(normalized)
+        search_filter = (
+            "(&(objectCategory=person)(objectClass=user)"
+            f"(|(mail={safe})(proxyAddresses=smtp:{safe})))"
+        )
+        with self._service_connection() as conn:
+            conn.search(
+                self.settings.ad_base_dn,
+                search_filter,
+                attributes=[
+                    "sAMAccountName",
+                    "displayName",
+                    "mail",
+                    "userAccountControl",
+                    "distinguishedName",
+                    "objectGUID",
+                ],
+                size_limit=max(1, min(limit, 50)),
+            )
+            users = [
+                user
+                for entry in conn.entries
+                if (user := self._entry_to_directory_user(entry)) is not None
+            ]
+
+        return sorted(
+            users,
+            key=lambda item: (
+                not item.is_enabled,
+                item.display_name.casefold(),
+                item.username,
+            ),
+        )[:limit]
+
+    def get_user_by_email(self, email: str) -> ADDirectoryUser | None:
+        users = self.users_by_email(email, limit=1)
+        return users[0] if users else None
+
     def logins_exist(self, logins: list[str]) -> set[str]:
         if not self.settings.ad_check_enabled:
             return set()

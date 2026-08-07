@@ -613,3 +613,70 @@
   }
 }
 
+/* Создание только AD для работника с существующей почтой */
+.registry-actions {
+  display: grid;
+  gap: 6px;
+  justify-items: stretch;
+}
+.registry-actions .button,
+.registry-actions .registry-mapped {
+  width: 100%;
+  text-align: center;
+  justify-content: center;
+}
+.registry-table th:last-child,
+.registry-table td:last-child {
+  width: 145px;
+  min-width: 145px;
+}
+.ad-only-summary {
+  max-width: 760px;
+}
+.ad-only-safety {
+  max-width: 920px;
+}
+.ad-candidate-list {
+  display: grid;
+  gap: 8px;
+}
+.ad-candidate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.ad-only-create-form {
+  margin-top: 18px;
+}
+.ad-only-confirm-check {
+  margin-top: 0;
+  padding: 12px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.ad-only-actions {
+  margin: 16px 0 0;
+}
+.ad-only-copy-card {
+  max-width: 760px;
+}
+.action-badge.ad-provision {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+@media (max-width: 700px) {
+  .ad-candidate-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ad-candidate-row .button {
+    width: 100%;
+    text-align: center;
+  }
+}

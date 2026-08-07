@@ -2,14 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
+from urllib.parse import urlencode
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import AuditLog, OperationStatus, ProvisioningOperation
+from app.models import (
+    ADProvisioningOperation,
+    AuditLog,
+    EmailLoginMapping,
+    HRSourceRecord,
+    OperationStatus,
+    ProvisioningOperation,
+)
 from app.services.ad import ActiveDirectoryService
+from app.services.email_login_mapping import EmailLoginMappingService
 from app.services.mailer import CredentialMailer, get_domain_mail_profile
-from app.services.names import transliterate
+from app.services.names import parse_two_line_input, transliterate
 from app.services.passwords import generate_ad_password, generate_mail_password
 from app.services.zimbra import ZimbraService
 
@@ -22,6 +33,49 @@ class ProvisioningInput:
     personal_email: str
     login: str
     mail_domain: str
+
+
+@dataclass(frozen=True)
+class ADNameCandidate:
+    username: str
+    display_name: str
+    email: str
+    is_enabled: bool
+    object_guid: str
+    mapping_url: str
+
+
+@dataclass(frozen=True)
+class ExistingMailboxADPreflight:
+    record_id: int
+    worker_key: str
+    source_id: str
+    full_name: str
+    corporate_email: str
+    login: str
+    zimbra_primary_email: str
+    zimbra_login: str
+    exact_matches: tuple[ADNameCandidate, ...]
+    name_candidates: tuple[ADNameCandidate, ...]
+    has_mapping: bool
+    can_create: bool
+    block_reason: str
+
+
+@dataclass(frozen=True)
+class ADOnlyProvisioningCredentials:
+    full_name: str
+    corporate_email: str
+    ad_login: str
+    ad_password: str
+    operation_id: int
+    dry_run: bool
+    status: str
+    ad_created: bool
+    ad_enabled: bool
+    credentials_mail_sent: bool
+    registry_updated: bool
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -100,6 +154,495 @@ class ProvisioningService:
             }
             for login in normalized
         ]
+
+    @staticmethod
+    def _login_from_existing_email(corporate_email: str) -> str:
+        normalized = str(corporate_email or "").strip().lower()
+        if normalized.count("@") != 1:
+            raise ValueError("В кадровом реестре указан некорректный корпоративный e-mail")
+        local_part, _ = normalized.split("@", 1)
+        if not local_part:
+            raise ValueError("В корпоративном e-mail отсутствует логин")
+
+        # В этом сценарии логин не транслитерируется и не исправляется:
+        # он должен в точности соответствовать уже существующей почте.
+        # Проверяем только ограничения, без которых AD физически не создаст
+        # sAMAccountName.
+        forbidden = set('/\\\\[]:;|=,+*?<>@"')
+        if len(local_part) > 20:
+            raise ValueError(
+                "Логин из существующего e-mail длиннее 20 символов. "
+                "Создать sAMAccountName без изменения логина невозможно."
+            )
+        if any(
+            char.isspace()
+            or ord(char) < 32
+            or char in forbidden
+            for char in local_part
+        ):
+            raise ValueError(
+                "Логин из существующего e-mail содержит символы, "
+                "недопустимые для sAMAccountName. Автоматически менять логин нельзя."
+            )
+        return local_part
+
+    @staticmethod
+    def _fio_parts(full_name: str) -> tuple[str, str, str]:
+        parsed = parse_two_line_input(full_name)
+        return parsed.last_name, parsed.first_name, parsed.middle_name
+
+    @staticmethod
+    def _name_tokens(value: str) -> list[str]:
+        return [
+            token.casefold()
+            for token in re.findall(r"[A-Za-zА-Яа-яЁё]+", str(value or ""))
+            if token
+        ]
+
+    @classmethod
+    def _name_candidate_score(
+        cls,
+        *,
+        last_name: str,
+        first_name: str,
+        middle_name: str,
+        display_name: str,
+    ) -> float:
+        tokens = cls._name_tokens(display_name)
+        if not tokens:
+            return 0.0
+
+        last = last_name.casefold()
+        first = first_name.casefold()
+        middle = middle_name.casefold()
+        token_set = set(tokens)
+
+        # Без фамилии совпадение слишком ненадежно.
+        if last not in token_set:
+            return 0.0
+
+        score = 4.0
+
+        if first in token_set:
+            score += 3.0
+        elif any(
+            len(token) == 1 and token == first[:1]
+            for token in tokens
+        ):
+            score += 1.5
+        else:
+            # Одной фамилии и совпавшего отчества недостаточно: для старых
+            # учеток это слишком легко даст ложное совпадение.
+            return 0.0
+
+        if middle:
+            if middle in token_set:
+                score += 2.0
+            elif any(
+                len(token) == 1 and token == middle[:1]
+                for token in tokens
+            ):
+                score += 1.0
+
+        return score
+
+    @staticmethod
+    def _candidate_to_view(user, corporate_email: str) -> ADNameCandidate:
+        return ADNameCandidate(
+            username=user.username,
+            display_name=user.display_name,
+            email=user.email,
+            is_enabled=user.is_enabled,
+            object_guid=user.object_guid,
+            mapping_url=(
+                "/settings/email-login-mapping?"
+                + urlencode(
+                    {
+                        "email": corporate_email,
+                        "ad_login": user.username,
+                    }
+                )
+            ),
+        )
+
+    def _name_candidates(
+        self,
+        *,
+        full_name: str,
+        corporate_email: str,
+        excluded_usernames: set[str] | None = None,
+    ) -> tuple[ADNameCandidate, ...]:
+        last_name, first_name, middle_name = self._fio_parts(full_name)
+        excluded = {
+            value.casefold()
+            for value in (excluded_usernames or set())
+            if value
+        }
+
+        candidates = self.ad.search_users(last_name, limit=50)
+        scored: list[tuple[float, object]] = []
+        for user in candidates:
+            if user.username.casefold() in excluded:
+                continue
+            score = self._name_candidate_score(
+                last_name=last_name,
+                first_name=first_name,
+                middle_name=middle_name,
+                display_name=user.display_name,
+            )
+            # Фамилия + полное имя или хотя бы инициал имени.
+            if score >= 5.5:
+                scored.append((score, user))
+
+        scored.sort(
+            key=lambda item: (
+                -item[0],
+                not item[1].is_enabled,
+                item[1].display_name.casefold(),
+                item[1].username,
+            )
+        )
+        return tuple(
+            self._candidate_to_view(user, corporate_email)
+            for _, user in scored[:12]
+        )
+
+    def prepare_ad_for_existing_mailbox(
+        self,
+        db: Session,
+        record_id: int,
+    ) -> ExistingMailboxADPreflight:
+        record = db.get(HRSourceRecord, record_id)
+        if record is None or not record.is_present:
+            raise ValueError("Работник отсутствует в текущем кадровом реестре")
+
+        corporate_email = record.corporate_email.strip().lower()
+        if not corporate_email:
+            raise ValueError("У работника нет корпоративного e-mail")
+
+        login = self._login_from_existing_email(corporate_email)
+        domain = corporate_email.rsplit("@", 1)[1]
+        get_domain_mail_profile(db, self.settings, domain)
+
+        mappings = db.scalars(
+            select(EmailLoginMapping).where(
+                EmailLoginMapping.worker_key == record.worker_key
+            )
+        ).all()
+        has_mapping = bool(mappings)
+
+        zimbra_identity = self.zimbra.account_by_address(corporate_email)
+        if zimbra_identity is None:
+            raise ValueError(
+                "Существующий адрес не найден в Zimbra. "
+                "Сценарий создания только AD недоступен."
+            )
+
+        exact_by_login = self.ad.get_user(login)
+        exact_by_email = self.ad.users_by_email(corporate_email, limit=10)
+
+        exact_users = []
+        seen: set[str] = set()
+        for user in [exact_by_login, *exact_by_email]:
+            if user is None:
+                continue
+            key = user.object_guid or user.username.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            exact_users.append(user)
+
+        exact_matches = tuple(
+            self._candidate_to_view(user, corporate_email)
+            for user in exact_users
+        )
+
+        excluded = {user.username for user in exact_users}
+        name_candidates: tuple[ADNameCandidate, ...] = ()
+        if not has_mapping and not exact_matches:
+            name_candidates = self._name_candidates(
+                full_name=record.fio,
+                corporate_email=corporate_email,
+                excluded_usernames=excluded,
+            )
+
+        block_reason = ""
+        if has_mapping:
+            block_reason = (
+                "Для работника уже существует явное сопоставление "
+                "с учетной записью AD. Создание новой учетной записи запрещено."
+            )
+        elif exact_matches:
+            block_reason = (
+                "В AD уже найдена учетная запись по логину или корпоративному e-mail. "
+                "Сначала используйте сопоставление, чтобы не создать дубль."
+            )
+
+        return ExistingMailboxADPreflight(
+            record_id=record.id,
+            worker_key=record.worker_key,
+            source_id=record.source_id,
+            full_name=record.fio,
+            corporate_email=corporate_email,
+            login=login,
+            zimbra_primary_email=zimbra_identity.primary_email,
+            zimbra_login=zimbra_identity.login,
+            exact_matches=exact_matches,
+            name_candidates=name_candidates,
+            has_mapping=has_mapping,
+            can_create=not block_reason,
+            block_reason=block_reason,
+        )
+
+    def _update_registry_after_ad_only(
+        self,
+        *,
+        db: Session,
+        record: HRSourceRecord,
+        corporate_email: str,
+        login: str,
+        operator: str,
+        warnings: list[str],
+    ) -> bool:
+        if self.settings.dry_run:
+            return False
+
+        now = datetime.now(timezone.utc)
+        try:
+            ad_user = self.ad.get_user(login)
+            zimbra_identity = self.zimbra.account_by_address(corporate_email)
+            if ad_user is None:
+                record.ad_status = "missing"
+                record.reconciliation_status = "issue"
+                record.reconciliation_error = (
+                    "После создания учетная запись AD не найдена повторной проверкой"
+                )
+                record.reconciled_at = now
+                db.commit()
+                return False
+
+            record.ad_status = "enabled" if ad_user.is_enabled else "disabled"
+
+            if zimbra_identity is None:
+                record.zimbra_status = "missing"
+                record.reconciliation_status = "issue"
+                record.reconciliation_error = (
+                    "После создания существующий адрес Zimbra не найден"
+                )
+                record.reconciled_at = now
+                db.commit()
+                return False
+
+            record.zimbra_status = (
+                "present"
+                if corporate_email in zimbra_identity.addresses
+                else "address_mismatch"
+            )
+
+            linked = zimbra_identity.login.casefold() == ad_user.username.casefold()
+            if not linked:
+                try:
+                    result = EmailLoginMappingService(
+                        self.settings,
+                        db,
+                    ).add_manual(
+                        corporate_email,
+                        ad_user.username,
+                        operator,
+                    )
+                    linked = result["status"] in {
+                        "created",
+                        "updated",
+                        "not_needed",
+                    }
+                except Exception as exc:
+                    warnings.append(
+                        "AD создана, но автоматическое сопоставление "
+                        f"с Zimbra не сохранено: {exc}"
+                    )
+
+            if (
+                record.ad_status == "enabled"
+                and record.zimbra_status == "present"
+                and linked
+            ):
+                record.reconciliation_status = "ok"
+                record.reconciliation_error = ""
+            else:
+                record.reconciliation_status = "issue"
+                if not record.reconciliation_error:
+                    record.reconciliation_error = (
+                        "После создания требуется повторная проверка сопоставления"
+                    )
+
+            record.login = login
+            record.reconciled_at = now
+            db.commit()
+            return record.reconciliation_status == "ok"
+        except Exception as exc:
+            db.rollback()
+            warnings.append(
+                "AD создана, но не удалось обновить кадровый реестр: "
+                f"{exc}"
+            )
+            return False
+
+    def provision_ad_for_existing_mailbox(
+        self,
+        db: Session,
+        operator: str,
+        record_id: int,
+        *,
+        confirm_name_candidates: bool = False,
+    ) -> ADOnlyProvisioningCredentials:
+        # Перед изменением повторяем все проверки: данные реестра и состояние
+        # внешних систем могли измениться с момента открытия страницы.
+        preflight = self.prepare_ad_for_existing_mailbox(db, record_id)
+        if not preflight.can_create:
+            raise RuntimeError(preflight.block_reason)
+        if preflight.name_candidates and not confirm_name_candidates:
+            raise RuntimeError(
+                "В AD найдены возможные совпадения по ФИО. "
+                "Подтвердите, что это другие люди, либо выполните сопоставление."
+            )
+
+        record = db.get(HRSourceRecord, record_id)
+        if record is None or not record.is_present:
+            raise RuntimeError("Работник больше не присутствует в кадровом реестре")
+
+        last_name, first_name, middle_name = self._fio_parts(preflight.full_name)
+        domain = preflight.corporate_email.rsplit("@", 1)[1]
+        mail_profile = get_domain_mail_profile(db, self.settings, domain)
+
+        # Пароль генерируется по тем же правилам, что и в обычном разделе
+        # «Создание». Логин, напротив, НЕ генерируется: он взят из e-mail.
+        ad_password_candidates = [
+            generate_ad_password(
+                transliterate(first_name),
+                transliterate(last_name),
+                self.settings.ad_password_min_length,
+                self.settings.ad_password_max_length,
+                self.settings.ad_password_specials,
+            )
+            for _ in range(10)
+        ]
+        ad_password = ""
+
+        operation = ADProvisioningOperation(
+            worker_key=record.worker_key,
+            source_id=record.source_id,
+            operator_username=operator,
+            full_name=preflight.full_name,
+            login=preflight.login,
+            corporate_email=preflight.corporate_email,
+            status=OperationStatus.RUNNING,
+        )
+        db.add(operation)
+        db.commit()
+        db.refresh(operation)
+
+        warnings: list[str] = []
+        ad_dn = ""
+
+        try:
+            ad_result = self.ad.create_disabled_user(
+                login=preflight.login,
+                password_candidates=ad_password_candidates,
+                last_name=last_name,
+                first_name=first_name,
+                middle_name=middle_name,
+                corporate_email=preflight.corporate_email,
+            )
+            ad_dn = ad_result.dn
+            ad_password = ad_result.accepted_password
+            operation.ad_created = True
+            db.commit()
+        except Exception as exc:
+            warnings.append(f"Учетная запись AD не создана: {exc}")
+
+        if operation.ad_created:
+            try:
+                self.ad.enable_user(ad_dn)
+                operation.ad_enabled = True
+                db.commit()
+            except Exception as exc:
+                warnings.append(
+                    f"Учетная запись AD создана, но осталась отключенной: {exc}"
+                )
+
+        if operation.ad_enabled:
+            try:
+                self.mailer.send_ad_credentials(
+                    profile=mail_profile,
+                    corporate_email=preflight.corporate_email,
+                    full_name=preflight.full_name,
+                    ad_login=preflight.login,
+                    ad_password=ad_password,
+                )
+                operation.credentials_mail_sent = True
+                db.commit()
+            except Exception as exc:
+                warnings.append(
+                    "Учетная запись AD создана, но письмо с реквизитами "
+                    f"не отправлено: {exc}"
+                )
+
+        if operation.ad_created:
+            operation.registry_updated = self._update_registry_after_ad_only(
+                db=db,
+                record=record,
+                corporate_email=preflight.corporate_email,
+                login=preflight.login,
+                operator=operator,
+                warnings=warnings,
+            )
+
+        complete = (
+            operation.ad_created
+            and operation.ad_enabled
+            and operation.credentials_mail_sent
+            and (operation.registry_updated or self.settings.dry_run)
+        )
+        operation.status = (
+            OperationStatus.SUCCESS
+            if complete
+            else OperationStatus.FAILED
+            if not operation.ad_created
+            else OperationStatus.PARTIAL
+        )
+        operation.error_message = "\n".join(warnings)[:4000]
+        operation.completed_at = datetime.now(timezone.utc)
+
+        db.add(
+            AuditLog(
+                actor=operator,
+                action="provision_ad_existing_mailbox",
+                target=preflight.corporate_email,
+                result=operation.status.value,
+                details=(
+                    f"worker_key={record.worker_key}; "
+                    f"login={preflight.login}; "
+                    f"mail_sent={operation.credentials_mail_sent}; "
+                    f"registry_updated={operation.registry_updated}"
+                )[:1000],
+            )
+        )
+        db.commit()
+
+        return ADOnlyProvisioningCredentials(
+            full_name=preflight.full_name,
+            corporate_email=preflight.corporate_email,
+            ad_login=preflight.login,
+            ad_password=ad_password,
+            operation_id=operation.id,
+            dry_run=self.settings.dry_run,
+            status=operation.status.value,
+            ad_created=operation.ad_created,
+            ad_enabled=operation.ad_enabled,
+            credentials_mail_sent=operation.credentials_mail_sent,
+            registry_updated=operation.registry_updated,
+            warnings=tuple(warnings),
+        )
 
     def provision(self, db: Session, operator: str, data: ProvisioningInput) -> ProvisioningCredentials:
         # Выбранный логин уже проверен оператором. Полный поиск альтернатив

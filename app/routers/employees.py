@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import AuditLog, DismissalSchedule, ProvisioningOperation
+from app.models import (
+    ADProvisioningOperation,
+    AuditLog,
+    DismissalSchedule,
+    ProvisioningOperation,
+)
 from app.security import get_current_user, get_or_create_csrf, validate_csrf
 from app.services.ad import ActiveDirectoryService
 from app.services.hr_registry import HRRegistryService
@@ -108,6 +113,54 @@ def _provisioning_journal_item(operation: ProvisioningOperation) -> dict[str, ob
     }
 
 
+def _ad_provisioning_journal_item(
+    operation: ADProvisioningOperation,
+) -> dict[str, object]:
+    status_labels = {
+        "draft": "Черновик",
+        "running": "Выполняется",
+        "partial": "Частично выполнено",
+        "success": "Успешно",
+        "failed": "Ошибка",
+    }
+    status_key = operation.status.value
+    return {
+        "kind": "ad-provision",
+        "record_id": operation.id,
+        "created_at": operation.created_at,
+        "action": "Создание AD для существующей почты",
+        "subject": operation.full_name,
+        "login": operation.login,
+        "corporate_email": operation.corporate_email,
+        "personal_email": "",
+        "mail_domain": (
+            operation.corporate_email.rsplit("@", 1)[1]
+            if "@" in operation.corporate_email
+            else ""
+        ),
+        "operator": operation.operator_username,
+        "status_key": status_key,
+        "status_label": status_labels.get(status_key, status_key),
+        "details": [
+            ("ФИО", operation.full_name),
+            ("Логин AD", operation.login),
+            ("Корпоративная почта", operation.corporate_email),
+            ("Учетная запись AD создана", _yes_no(operation.ad_created)),
+            ("Учетная запись AD включена", _yes_no(operation.ad_enabled)),
+            (
+                "Реквизиты AD отправлены",
+                _yes_no(operation.credentials_mail_sent),
+            ),
+            (
+                "Кадровый реестр обновлен",
+                _yes_no(operation.registry_updated),
+            ),
+        ],
+        "error_message": operation.error_message,
+        "completed_at": operation.completed_at,
+    }
+
+
 def _dismissal_journal_item(schedule: DismissalSchedule) -> dict[str, object]:
     if schedule.ad_expiration_set and schedule.zimbra_note_set:
         status_key = "success"
@@ -169,9 +222,18 @@ def dashboard(
         .order_by(desc(DismissalSchedule.created_at))
         .limit(50)
     ).all()
+    ad_provisioning_operations = db.scalars(
+        select(ADProvisioningOperation)
+        .order_by(desc(ADProvisioningOperation.created_at))
+        .limit(50)
+    ).all()
 
     journal_items = [
         *(_provisioning_journal_item(item) for item in provisioning_operations),
+        *(
+            _ad_provisioning_journal_item(item)
+            for item in ad_provisioning_operations
+        ),
         *(_dismissal_journal_item(item) for item in dismissal_operations),
     ]
     journal_items.sort(key=lambda item: item["created_at"], reverse=True)
@@ -249,6 +311,97 @@ def employee_registry(request: Request, q: str = "", status: str = "all", db: Se
     if status not in {"all", "issues", "ok", "not_checked"}: status = "all"
     service = HRRegistryService(settings, db)
     return templates.TemplateResponse(request, "hr_registry.html", _context(request, rows=service.list_rows(query=q, status=status, limit=1000), summary=service.summary(), query=q, selected_status=status))
+
+
+@router.get("/employees/registry/{record_id}/create-ad")
+def create_ad_for_existing_mailbox_form(
+    record_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    get_current_user(request)
+    service = ProvisioningService(settings)
+    try:
+        preflight = service.prepare_ad_for_existing_mailbox(db, record_id)
+        return templates.TemplateResponse(
+            request,
+            "ad_only_confirm.html",
+            _context(
+                request,
+                preflight=preflight,
+                error="",
+                dry_run=settings.dry_run,
+            ),
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "ad_only_confirm.html",
+            _context(
+                request,
+                preflight=None,
+                error=str(exc),
+                dry_run=settings.dry_run,
+            ),
+            status_code=400,
+        )
+
+
+@router.post("/employees/registry/{record_id}/create-ad")
+def create_ad_for_existing_mailbox(
+    record_id: int,
+    request: Request,
+    csrf: str = Form(...),
+    confirm_name_candidates: str = Form("false"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    user = get_current_user(request)
+    confirmed = confirm_name_candidates.strip().lower() == "true"
+    service = ProvisioningService(settings)
+
+    try:
+        credentials = service.provision_ad_for_existing_mailbox(
+            db,
+            user.username,
+            record_id,
+            confirm_name_candidates=confirmed,
+        )
+        response = templates.TemplateResponse(
+            request,
+            "ad_only_result.html",
+            _context(
+                request,
+                credentials=credentials,
+                error="",
+            ),
+        )
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, private"
+        )
+        response.headers["Pragma"] = "no-cache"
+        return response
+    except Exception as exc:
+        try:
+            preflight = service.prepare_ad_for_existing_mailbox(
+                db,
+                record_id,
+            )
+        except Exception:
+            preflight = None
+        return templates.TemplateResponse(
+            request,
+            "ad_only_confirm.html",
+            _context(
+                request,
+                preflight=preflight,
+                error=str(exc),
+                dry_run=settings.dry_run,
+            ),
+            status_code=400,
+        )
 
 
 @router.get("/employees/new")

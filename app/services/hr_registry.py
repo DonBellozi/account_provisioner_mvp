@@ -569,6 +569,17 @@ class HRRegistryService:
                     {"fio": record.fio}
                 )
 
+            create_ad_url = ""
+            if (
+                mapping is None
+                and record.ad_status == "missing"
+                and record.zimbra_status == "present"
+                and record.corporate_email.strip()
+            ):
+                create_ad_url = (
+                    f"/employees/registry/{record.id}/create-ad"
+                )
+
             mapping_url = ""
             if (
                 record.reconciliation_status in {"issue", "error"}
@@ -616,6 +627,7 @@ class HRRegistryService:
                     "error": record.reconciliation_error,
                     "reconciled_at": record.reconciled_at,
                     "create_url": create_url,
+                    "create_ad_url": create_ad_url,
                     "mapping_url": mapping_url,
                     "has_mapping": mapping is not None,
                 }

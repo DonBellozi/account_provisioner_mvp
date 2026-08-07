@@ -77,6 +77,37 @@ class ProvisioningOperation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+class ADProvisioningOperation(Base):
+    """Создание только AD для работника с уже существующей корпоративной почтой."""
+
+    __tablename__ = "ad_provisioning_operations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    worker_key: Mapped[str] = mapped_column(String(64), index=True)
+    source_id: Mapped[str] = mapped_column(String(128), index=True)
+    operator_username: Mapped[str] = mapped_column(String(256), index=True)
+    full_name: Mapped[str] = mapped_column(String(512))
+    login: Mapped[str] = mapped_column(String(64), index=True)
+    corporate_email: Mapped[str] = mapped_column(String(320), index=True)
+    status: Mapped[OperationStatus] = mapped_column(
+        Enum(OperationStatus),
+        default=OperationStatus.DRAFT,
+    )
+    ad_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    ad_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    credentials_mail_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    registry_updated: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
 class DismissalSchedule(Base):
     __tablename__ = "dismissal_schedules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

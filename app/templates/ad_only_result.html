@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Учетная запись AD создана{% endblock %}
+{% block content %}
+<h1>Создание учетной записи Active Directory</h1>
+
+{% if credentials.dry_run %}
+<div class="alert warning">
+  Это результат DRY_RUN. Реальная учетная запись и письмо не создавались.
+</div>
+{% endif %}
+
+{% if credentials.warnings %}
+<div class="alert warning">
+  <strong>Операция завершена со статусом {{ credentials.status }}.</strong>
+  <ul>
+    {% for warning in credentials.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="alert success">
+  Учетная запись Active Directory создана, включена, а реквизиты отправлены
+  на существующую корпоративную почту.
+</div>
+{% endif %}
+
+<section class="card">
+  <h2>Состояние операции</h2>
+  <div class="state-grid">
+    <span>Логин AD</span><strong><code>{{ credentials.ad_login }}</code></strong>
+    <span>AD создана</span><strong>{{ 'Да' if credentials.ad_created else 'Нет' }}</strong>
+    <span>AD включена</span><strong>{{ 'Да' if credentials.ad_enabled else 'Нет' }}</strong>
+    <span>Письмо с реквизитами AD</span>
+    <strong>
+      {% if credentials.credentials_mail_sent %}
+      Отправлено на {{ credentials.corporate_email }}
+      {% else %}
+      Не отправлено
+      {% endif %}
+    </strong>
+    <span>Кадровый реестр</span>
+    <strong>
+      {% if credentials.registry_updated %}
+      Обновлен
+      {% elif credentials.dry_run %}
+      Не изменяется в DRY_RUN
+      {% else %}
+      Требует повторной проверки
+      {% endif %}
+    </strong>
+  </div>
+</section>
+
+{% if credentials.ad_created %}
+<section class="card credentials ad-only-copy-card">
+  <h2>Реквизиты</h2>
+  <div class="credential-row"><span>ФИО</span><strong>{{ credentials.full_name }}</strong></div>
+  <div class="credential-row"><span>E-mail</span><code>{{ credentials.corporate_email }}</code></div>
+  <div class="credential-row"><span>Пароль</span><code>{{ credentials.ad_password }}</code></div>
+</section>
+
+<div class="actions">
+  <button type="button" onclick="copyADCredentials(this)">Скопировать</button>
+  <a class="button secondary" href="/employees/registry">Вернуться в реестр</a>
+</div>
+<p class="muted">
+  Пароль показан только на этой странице и не сохраняется в базе или журнале.
+</p>
+
+<script>
+async function writePlainTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    textarea.remove();
+  }
+
+  if (!copied) {
+    throw new Error('Браузер не разрешил запись в буфер обмена');
+  }
+}
+
+async function copyADCredentials(button) {
+  const lines = [
+    {{ credentials.full_name|tojson }},
+    {{ credentials.corporate_email|tojson }},
+    {{ credentials.ad_password|tojson }},
+  ];
+
+  const originalText = button.textContent;
+  try {
+    await writePlainTextToClipboard(lines.join('\n') + '\n\n\n');
+    button.textContent = 'Реквизиты скопированы';
+  } catch (error) {
+    button.textContent = 'Не удалось скопировать';
+    alert(
+      'Браузер не разрешил автоматическое копирование. ' +
+      'Откройте страницу по HTTPS или разрешите доступ к буферу обмена.'
+    );
+  } finally {
+    window.setTimeout(() => {
+      button.textContent = originalText;
+    }, 1800);
+  }
+}
+</script>
+{% else %}
+<div class="actions">
+  <a class="button secondary" href="/employees/registry">Вернуться в реестр</a>
+</div>
+{% endif %}
+{% endblock %}

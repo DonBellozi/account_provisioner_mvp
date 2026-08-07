@@ -276,6 +276,7 @@ def _mapping_page_context(
         "source_error": source_error,
         "mappings": mappings,
         "prefill_email": request.query_params.get("email", ""),
+        "prefill_ad_login": request.query_params.get("ad_login", ""),
         "result": result,
         "error": error,
     }

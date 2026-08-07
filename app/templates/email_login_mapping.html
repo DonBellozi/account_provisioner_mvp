@@ -87,7 +87,7 @@
       </label>
       <label>
         <span>Логин AD</span>
-        <input type="text" name="ad_login" required autocomplete="off" placeholder="ivanov.ii">
+        <input type="text" name="ad_login" required autocomplete="off" value="{{ prefill_ad_login }}" placeholder="ivanov.ii">
       </label>
       <button class="button" type="submit"{% if source_error %} disabled{% endif %}>Сохранить сопоставление</button>
     </form>
