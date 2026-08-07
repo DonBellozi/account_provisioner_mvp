@@ -394,6 +394,46 @@ class EmailLoginMappingService:
         self.db.refresh(mapping)
         return ("created" if created else "updated"), mapping
 
+    def save_confirmed_identity(
+        self,
+        *,
+        record: HRSourceRecord,
+        ad_user: ADDirectoryUser,
+        zimbra: ZimbraAccountIdentity,
+        actor: str,
+    ) -> dict:
+        """Сохранить подтвержденную оператором связь без повторного поиска."""
+        source_email = normalize_email(record.corporate_email)
+        if not source_email or "@" not in source_email:
+            raise ValueError("У работника нет корректного корпоративного e-mail")
+
+        source_domain = str(record.source_id or "").strip().lower()
+        if source_domain not in self.allowed_domains:
+            source_domain = self.resolve_source_domain()
+
+        if email_domain(source_email) != source_domain:
+            raise ValueError(
+                f"Для текущей выгрузки ожидается домен {source_domain}"
+            )
+
+        status, saved = self._save_mapping(
+            record=record,
+            source_domain=source_domain,
+            source_email=source_email,
+            ad_user=ad_user,
+            zimbra=zimbra,
+            actor=actor,
+        )
+        return {
+            "status": status,
+            "mapping_id": saved.id if saved else None,
+            "fio": record.fio,
+            "email": source_email,
+            "ad_login": ad_user.username,
+            "zimbra_login": zimbra.login,
+        }
+
+
     def add_manual(
         self,
         source_email: str,

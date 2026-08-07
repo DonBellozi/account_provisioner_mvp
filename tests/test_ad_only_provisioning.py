@@ -61,6 +61,9 @@ class FakeAD:
         self.created_email = ""
 
     def get_user(self, login):
+        for user in [*self.name_candidates, *self.email_matches]:
+            if user.username.casefold() == str(login).casefold():
+                return user
         if not self.created:
             return None
         return ADDirectoryUser(
@@ -76,7 +79,15 @@ class FakeAD:
         return self.email_matches[:limit]
 
     def search_users(self, query, limit=50):
-        return self.name_candidates
+        q = str(query or "").casefold()
+        result = []
+        for user in self.name_candidates:
+            haystack = " ".join(
+                [user.username, user.display_name, user.email]
+            ).casefold()
+            if q in haystack:
+                result.append(user)
+        return result[:limit]
 
     def create_disabled_user(
         self,
@@ -307,6 +318,81 @@ class ADOnlyProvisioningTests(unittest.TestCase):
         self.assertEqual(self.record.ad_status, "enabled")
         self.assertEqual(self.record.zimbra_status, "present")
         self.assertEqual(self.record.reconciliation_status, "ok")
+
+
+    @patch("app.services.provisioning.get_domain_mail_profile")
+    def test_name_candidate_can_be_found_after_surname_change(self, profile):
+        profile.return_value = SimpleNamespace(domain="org.com")
+        candidate = ADDirectoryUser(
+            "petrova.av",
+            display_name="Петрова Алла Владимировна",
+            email="",
+            distinguished_name="CN=legacy",
+            is_enabled=True,
+            object_guid="55555555-5555-5555-5555-555555555555",
+        )
+        service = self.service(name_candidates=[candidate])
+
+        preflight = service.prepare_ad_for_existing_mailbox(
+            self.db,
+            self.record.id,
+        )
+
+        self.assertEqual(len(preflight.name_candidates), 1)
+        self.assertEqual(preflight.name_candidates[0].username, "petrova.av")
+
+    @patch("app.services.provisioning.get_domain_mail_profile")
+    def test_confirm_candidate_marks_registry_ok(self, profile):
+        profile.return_value = SimpleNamespace(domain="org.com")
+        candidate = ADDirectoryUser(
+            "petrova.av",
+            display_name="Петрова Алла Владимировна",
+            email="",
+            distinguished_name="CN=legacy",
+            is_enabled=True,
+            object_guid="66666666-6666-6666-6666-666666666666",
+        )
+        service = self.service(name_candidates=[candidate])
+
+        with patch(
+            "app.services.provisioning.EmailLoginMappingService.save_confirmed_identity",
+            return_value={
+                "status": "created",
+                "mapping_id": 1,
+                "fio": self.record.fio,
+                "email": self.record.corporate_email,
+                "ad_login": candidate.username,
+                "zimbra_login": "abacumova.av",
+            },
+        ) as save_mapping:
+            result = service.confirm_ad_candidate(
+                self.db,
+                "admin",
+                self.record.id,
+                candidate.username,
+            )
+
+        self.assertEqual(result["ad_login"], "petrova.av")
+        self.assertEqual(result["reconciliation_status"], "ok")
+        save_mapping.assert_called_once()
+        self.db.refresh(self.record)
+        self.assertEqual(self.record.ad_status, "enabled")
+        self.assertEqual(self.record.zimbra_status, "present")
+        self.assertEqual(self.record.reconciliation_status, "ok")
+
+    @patch("app.services.provisioning.get_domain_mail_profile")
+    def test_confirm_rejects_unknown_candidate(self, profile):
+        profile.return_value = SimpleNamespace(domain="org.com")
+        service = self.service()
+
+        with self.assertRaisesRegex(ValueError, "не входит в найденные кандидаты"):
+            service.confirm_ad_candidate(
+                self.db,
+                "admin",
+                self.record.id,
+                "someone.else",
+            )
+
 
 
 if __name__ == "__main__":

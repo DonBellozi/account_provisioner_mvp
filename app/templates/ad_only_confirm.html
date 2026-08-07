@@ -22,6 +22,25 @@
 <div class="alert error">{{ error }}</div>
 {% endif %}
 
+{% if confirmation %}
+<div class="alert success">
+  <strong>Соответствие подтверждено.</strong><br>
+  {{ confirmation.fio }} связан с учетной записью AD
+  <code>{{ confirmation.ad_login }}</code>.
+</div>
+<section class="card ad-only-summary">
+  <div class="credential-row"><span>ФИО</span><strong>{{ confirmation.fio }}</strong></div>
+  <div class="credential-row"><span>E-mail</span><code>{{ confirmation.email }}</code></div>
+  <div class="credential-row"><span>Учетная запись AD</span><code>{{ confirmation.ad_login }}</code></div>
+  {% if confirmation.ad_display_name %}
+  <div class="credential-row"><span>Имя в AD</span><span>{{ confirmation.ad_display_name }}</span></div>
+  {% endif %}
+  <div class="actions ad-only-actions">
+    <a class="button" href="/employees/registry">Вернуться в кадровый реестр</a>
+  </div>
+</section>
+{% endif %}
+
 {% if preflight %}
 <section class="card ad-only-summary">
   <h2>Работник</h2>
@@ -64,7 +83,14 @@
           <span>{{ 'включена' if candidate.is_enabled else 'отключена' }}</span>
         </div>
       </div>
-      <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+      <div class="ad-candidate-actions">
+        <form method="post" action="/employees/registry/{{ preflight.record_id }}/confirm-ad">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="ad_login" value="{{ candidate.username }}">
+          <button class="button small" type="submit">Подтвердить</button>
+        </form>
+        <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -76,8 +102,9 @@
   <h2>Возможные совпадения по ФИО</h2>
   <p class="muted">
     Формат старых displayName может отличаться: ФИО, ИОФ, «Фамилия Имя О.»,
-    «Имя О. Фамилия» и другие варианты. Совпадения ниже не считаются
-    подтвержденными автоматически.
+    «Имя О. Фамилия» и другие варианты. При смене фамилии система также
+    может показать учетку со старой фамилией, если совпадают имя и отчество.
+    Совпадения ниже не считаются подтвержденными автоматически.
   </p>
   <div class="ad-candidate-list">
     {% for candidate in preflight.name_candidates %}
@@ -90,7 +117,14 @@
           <span>{{ 'включена' if candidate.is_enabled else 'отключена' }}</span>
         </div>
       </div>
-      <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+      <div class="ad-candidate-actions">
+        <form method="post" action="/employees/registry/{{ preflight.record_id }}/confirm-ad">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="ad_login" value="{{ candidate.username }}">
+          <button class="button small" type="submit">Подтвердить</button>
+        </form>
+        <a class="button secondary small" href="{{ candidate.mapping_url }}">Сопоставить</a>
+      </div>
     </div>
     {% endfor %}
   </div>

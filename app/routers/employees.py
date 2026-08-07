@@ -348,6 +348,59 @@ def create_ad_for_existing_mailbox_form(
         )
 
 
+@router.post("/employees/registry/{record_id}/confirm-ad")
+def confirm_existing_ad_candidate(
+    record_id: int,
+    request: Request,
+    ad_login: str = Form(...),
+    csrf: str = Form(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    validate_csrf(request, csrf)
+    user = get_current_user(request)
+    service = ProvisioningService(settings)
+
+    try:
+        confirmation = service.confirm_ad_candidate(
+            db,
+            user.username,
+            record_id,
+            ad_login,
+        )
+        return templates.TemplateResponse(
+            request,
+            "ad_only_confirm.html",
+            _context(
+                request,
+                preflight=None,
+                confirmation=confirmation,
+                error="",
+                dry_run=settings.dry_run,
+            ),
+        )
+    except Exception as exc:
+        try:
+            preflight = service.prepare_ad_for_existing_mailbox(
+                db,
+                record_id,
+            )
+        except Exception:
+            preflight = None
+        return templates.TemplateResponse(
+            request,
+            "ad_only_confirm.html",
+            _context(
+                request,
+                preflight=preflight,
+                confirmation=None,
+                error=str(exc),
+                dry_run=settings.dry_run,
+            ),
+            status_code=400,
+        )
+
+
 @router.post("/employees/registry/{record_id}/create-ad")
 def create_ad_for_existing_mailbox(
     record_id: int,

@@ -217,34 +217,44 @@ class ProvisioningService:
         middle = middle_name.casefold()
         token_set = set(tokens)
 
-        # Без фамилии совпадение слишком ненадежно.
-        if last not in token_set:
-            return 0.0
-
-        score = 4.0
-
-        if first in token_set:
-            score += 3.0
-        elif any(
+        surname_match = last in token_set
+        first_full = first in token_set
+        first_initial = any(
             len(token) == 1 and token == first[:1]
             for token in tokens
-        ):
-            score += 1.5
-        else:
-            # Одной фамилии и совпавшего отчества недостаточно: для старых
-            # учеток это слишком легко даст ложное совпадение.
-            return 0.0
-
-        if middle:
-            if middle in token_set:
-                score += 2.0
-            elif any(
+        )
+        middle_full = bool(middle and middle in token_set)
+        middle_initial = bool(
+            middle
+            and any(
                 len(token) == 1 and token == middle[:1]
                 for token in tokens
-            ):
-                score += 1.0
+            )
+        )
 
-        return score
+        if surname_match:
+            score = 4.0
+            if first_full:
+                score += 3.0
+            elif first_initial:
+                score += 1.5
+            else:
+                return 0.0
+
+            if middle_full:
+                score += 2.0
+            elif middle_initial:
+                score += 1.0
+            return score
+
+        # Смена фамилии: автоматически связь не устанавливаем, но показываем
+        # сильного кандидата оператору. Без совпадения фамилии требуем полное
+        # имя и совпадение отчества хотя бы инициалом.
+        if first_full and middle_full:
+            return 6.5
+        if first_full and middle_initial:
+            return 5.5
+        return 0.0
 
     @staticmethod
     def _candidate_to_view(user, corporate_email: str) -> ADNameCandidate:
@@ -279,7 +289,22 @@ class ProvisioningService:
             if value
         }
 
-        candidates = self.ad.search_users(last_name, limit=50)
+        # Ищем не только по текущей фамилии. Имя и отчество нужны для
+        # случаев, когда в AD осталась старая фамилия.
+        search_terms = [last_name, first_name]
+        if middle_name:
+            search_terms.append(middle_name)
+
+        candidates = []
+        seen_candidates: set[str] = set()
+        for term in search_terms:
+            for user in self.ad.search_users(term, limit=50):
+                key = (user.object_guid or user.username).casefold()
+                if key in seen_candidates:
+                    continue
+                seen_candidates.add(key)
+                candidates.append(user)
+
         scored: list[tuple[float, object]] = []
         for user in candidates:
             if user.username.casefold() in excluded:
@@ -290,7 +315,6 @@ class ProvisioningService:
                 middle_name=middle_name,
                 display_name=user.display_name,
             )
-            # Фамилия + полное имя или хотя бы инициал имени.
             if score >= 5.5:
                 scored.append((score, user))
 
@@ -486,6 +510,110 @@ class ProvisioningService:
                 f"{exc}"
             )
             return False
+
+    def confirm_ad_candidate(
+        self,
+        db: Session,
+        operator: str,
+        record_id: int,
+        ad_login: str,
+    ) -> dict:
+        """Подтвердить, что найденная AD-учетка принадлежит работнику 1С."""
+        preflight = self.prepare_ad_for_existing_mailbox(db, record_id)
+        normalized_login = str(ad_login or "").strip().lower()
+        if not normalized_login:
+            raise ValueError("Не указан логин AD")
+
+        candidates = {
+            candidate.username.casefold(): candidate
+            for candidate in (
+                *preflight.exact_matches,
+                *preflight.name_candidates,
+            )
+        }
+        candidate = candidates.get(normalized_login.casefold())
+        if candidate is None:
+            raise ValueError(
+                "Учетная запись больше не входит в найденные кандидаты. "
+                "Обновите страницу и повторите проверку."
+            )
+
+        record = db.get(HRSourceRecord, record_id)
+        if record is None or not record.is_present:
+            raise ValueError("Работник отсутствует в текущем кадровом реестре")
+
+        ad_user = self.ad.get_user(candidate.username)
+        if ad_user is None:
+            raise ValueError(
+                f"AD: учетная запись {candidate.username} больше не найдена"
+            )
+
+        zimbra_identity = self.zimbra.account_by_address(
+            preflight.corporate_email
+        )
+        if zimbra_identity is None:
+            raise ValueError(
+                "Zimbra: существующий корпоративный адрес больше не найден"
+            )
+
+        mapping_result = EmailLoginMappingService(
+            self.settings,
+            db,
+        ).save_confirmed_identity(
+            record=record,
+            ad_user=ad_user,
+            zimbra=zimbra_identity,
+            actor=operator,
+        )
+
+        now = datetime.now(timezone.utc)
+        record.ad_status = "enabled" if ad_user.is_enabled else "disabled"
+        record.zimbra_status = (
+            "present"
+            if preflight.corporate_email in zimbra_identity.addresses
+            else "address_mismatch"
+        )
+
+        if record.ad_status == "enabled" and record.zimbra_status == "present":
+            record.reconciliation_status = "ok"
+            record.reconciliation_error = ""
+        else:
+            record.reconciliation_status = "issue"
+            reasons = []
+            if record.ad_status == "disabled":
+                reasons.append("Подтвержденная учетная запись AD отключена")
+            if record.zimbra_status != "present":
+                reasons.append(
+                    "Корпоративный e-mail не привязан к найденному ящику Zimbra"
+                )
+            record.reconciliation_error = "\n".join(reasons)
+
+        record.reconciled_at = now
+        db.add(
+            AuditLog(
+                actor=operator,
+                action="confirm_ad_candidate",
+                target=preflight.corporate_email,
+                result="success",
+                details=(
+                    f"AD={ad_user.username}; "
+                    f"objectGUID={ad_user.object_guid}; "
+                    f"mapping={mapping_result['status']}"
+                )[:1000],
+            )
+        )
+        db.commit()
+
+        return {
+            "fio": record.fio,
+            "email": preflight.corporate_email,
+            "ad_login": ad_user.username,
+            "ad_display_name": ad_user.display_name,
+            "mapping_status": mapping_result["status"],
+            "reconciliation_status": record.reconciliation_status,
+            "ad_enabled": ad_user.is_enabled,
+        }
+
 
     def provision_ad_for_existing_mailbox(
         self,
