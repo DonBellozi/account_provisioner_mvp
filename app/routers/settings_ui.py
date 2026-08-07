@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -10,6 +11,7 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.security import get_or_create_csrf, require_admin, validate_csrf
 from app.services.ad import ActiveDirectoryService
+from app.services.email_login_mapping import EmailLoginMappingService
 from app.services.hr_registry import HRRegistryService
 from app.services.mailer import CredentialMailer
 from app.services.onec_import import OneCImportService
@@ -132,8 +134,10 @@ def _integration_overview(settings: Settings) -> dict[str, dict[str, object]]:
                 if settings.onec_worker_hash_secret.strip()
                 else "APP_SECRET_KEY (временно)"
             ),
-            "source_id": settings.onec_source_id,
-            "source_name": settings.onec_source_name,
+            "source_domain": (
+                settings.onec_source_domain.strip().lower()
+                or "автоматически по e-mail выгрузки"
+            ),
         },
     }
 
@@ -147,15 +151,20 @@ def settings_overview(
     current = require_admin(request)
     onec_service = OneCImportService(settings, db)
     registry = HRRegistryService(settings, db)
+    registry_summary = registry.summary()
+    integrations = _integration_overview(settings)
+    if registry_summary.get("source_id") not in {"", "org_com"}:
+        integrations["onec"]["source_domain"] = registry_summary["source_id"]
+
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             "user": current,
             "csrf": get_or_create_csrf(request),
-            "integrations": _integration_overview(settings),
+            "integrations": integrations,
             "onec_last_report": onec_service.load_last_report(),
-            "onec_registry_summary": registry.summary(),
+            "onec_registry_summary": registry_summary,
         },
     )
 
@@ -240,3 +249,182 @@ def onec_reconcile(request: Request, csrf: str = Form(...), settings: Settings =
         return {"ok": True, "summary": HRRegistryService(settings, db).reconcile_current()}
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+def _mapping_page_context(
+    request: Request,
+    *,
+    settings: Settings,
+    db: Session,
+    result: dict | None = None,
+    error: str = "",
+):
+    current = require_admin(request)
+    service = EmailLoginMappingService(settings, db)
+    source_domain = ""
+    mappings: list[dict] = []
+    source_error = ""
+    try:
+        source_domain = service.resolve_source_domain()
+        mappings = service.list_mappings(source_domain)
+    except Exception as exc:
+        source_error = str(exc)
+
+    return {
+        "user": current,
+        "csrf": get_or_create_csrf(request),
+        "source_domain": source_domain,
+        "source_error": source_error,
+        "mappings": mappings,
+        "prefill_email": request.query_params.get("email", ""),
+        "result": result,
+        "error": error,
+    }
+
+
+@router.get("/settings/email-login-mapping")
+def email_login_mapping_page(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    return templates.TemplateResponse(
+        request,
+        "email_login_mapping.html",
+        _mapping_page_context(
+            request,
+            settings=settings,
+            db=db,
+        ),
+    )
+
+
+@router.post("/settings/email-login-mapping/add")
+def email_login_mapping_add(
+    request: Request,
+    source_email: str = Form(...),
+    ad_login: str = Form(...),
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    validate_csrf(request, csrf)
+    current = require_admin(request)
+    try:
+        result = EmailLoginMappingService(
+            settings,
+            db,
+        ).add_manual(
+            source_email,
+            ad_login,
+            current.username,
+        )
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                result={"manual": result},
+            ),
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+
+
+@router.post("/settings/email-login-mapping/import")
+async def email_login_mapping_import(
+    request: Request,
+    file: UploadFile = File(...),
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    validate_csrf(request, csrf)
+    current = require_admin(request)
+    try:
+        if not file.filename.lower().endswith(".xlsx"):
+            raise ValueError("Загрузите файл XLSX")
+        data = await file.read()
+        result = EmailLoginMappingService(
+            settings,
+            db,
+        ).import_xlsx(
+            data,
+            current.username,
+        )
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                result={"import": result},
+            ),
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+
+
+@router.post("/settings/email-login-mapping/{mapping_id}/delete")
+def email_login_mapping_delete(
+    mapping_id: int,
+    request: Request,
+    csrf: str = Form(...),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+):
+    validate_csrf(request, csrf)
+    current = require_admin(request)
+    try:
+        EmailLoginMappingService(
+            settings,
+            db,
+        ).delete_mapping(
+            mapping_id,
+            current.username,
+        )
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                result={"deleted": True},
+            ),
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request,
+            "email_login_mapping.html",
+            _mapping_page_context(
+                request,
+                settings=settings,
+                db=db,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+

@@ -128,3 +128,43 @@ class HRSourceRecord(Base):
     reconciliation_status: Mapped[str] = mapped_column(String(32), default="not_checked", index=True)
     reconciliation_error: Mapped[str] = mapped_column(Text, default="")
     reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class EmailLoginMapping(Base):
+    """Явное сопоставление кадрового работника, AD и Zimbra.
+
+    worker_key is HMAC from SNILS. Plain SNILS is never stored.
+    objectGUID and zimbraId keep the link stable if names are changed.
+    """
+
+    __tablename__ = "email_login_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "worker_key",
+            "source_domain",
+            name="uq_email_login_mapping_worker_domain",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    worker_key: Mapped[str] = mapped_column(String(64), index=True)
+    source_domain: Mapped[str] = mapped_column(String(255), index=True)
+    source_email: Mapped[str] = mapped_column(String(320), index=True)
+
+    ad_object_guid: Mapped[str] = mapped_column(String(64), index=True)
+    ad_login: Mapped[str] = mapped_column(String(128), index=True)
+
+    zimbra_id: Mapped[str] = mapped_column(String(128), index=True)
+    zimbra_email: Mapped[str] = mapped_column(String(320), index=True)
+
+    created_by: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+

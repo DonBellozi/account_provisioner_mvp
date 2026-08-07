@@ -133,6 +133,7 @@
           </button>
           <button class="button secondary" type="button" id="onec-reconcile">Пересверить AD/Zimbra</button>
           <a class="button secondary" href="/employees/registry">Открыть реестр</a>
+          <a class="button secondary" href="/settings/email-login-mapping">Сопоставление e-mail и логина</a>
         </div>
       </div>
 
@@ -145,7 +146,7 @@
         <dt>Папка</dt><dd>{{ integrations.onec.folder }}</dd>
         <dt>Фильтр отправителя</dt><dd>{{ integrations.onec.sender }}</dd>
         <dt>Глубина поиска</dt><dd>{{ integrations.onec.lookback }}</dd>
-        <dt>Кадровый источник</dt><dd>{{ integrations.onec.source_name }} <code>{{ integrations.onec.source_id }}</code></dd>
+        <dt>Домен выгрузки 1С</dt><dd><code>{{ integrations.onec.source_domain }}</code></dd>
         <dt>Имя вложения</dt><dd>{{ integrations.onec.filename }}</dd>
         <dt>Каталог данных</dt><dd><code>{{ integrations.onec.data_dir }}</code></dd>
         <dt>HMAC-ключ идентификации</dt><dd>{{ integrations.onec.hash_secret }}</dd>
@@ -158,7 +159,7 @@
       </div>
 
       <div class="integration-test-result" id="integration-result-onec"></div>
-      {% if onec_registry_summary.total %}<div class="onec-registry-summary"><strong>Кадровый реестр</strong><div class="onec-diff-grid"><div><span>Работников</span><strong>{{ onec_registry_summary.total }}</strong></div><div><span>Соответствует</span><strong>{{ onec_registry_summary.ok }}</strong></div><div><span>Требует проверки</span><strong>{{ onec_registry_summary.issues + onec_registry_summary.errors }}</strong></div></div></div>{% endif %}
+      {% if onec_registry_summary.total %}<div class="onec-registry-summary"><strong>Кадровый реестр</strong><div class="onec-diff-grid"><div><span>Работников</span><strong>{{ onec_registry_summary.total }}</strong></div><div><span>Соответствует</span><strong>{{ onec_registry_summary.ok }}</strong></div><div><span>Требует проверки</span><strong>{{ onec_registry_summary.issues + onec_registry_summary.errors }}</strong></div><div><span>Не проверено</span><strong>{{ onec_registry_summary.not_checked }}</strong></div><div><span>Сопоставлений</span><strong>{{ onec_registry_summary.mapping_count }}</strong></div></div></div>{% endif %}
       <div class="onec-result" id="onec-result">
         {% if onec_last_report %}
         <div class="onec-report-heading">

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Сопоставление e-mail и логина{% endblock %}
+{% block content %}
+<div class="heading-row">
+  <div>
+    <h1>Сопоставление e-mail и логина</h1>
+    <p class="muted">
+      Для работников, у которых логин Active Directory отличается от логина
+      почтового ящика. Внутри сохраняются objectGUID AD и zimbraId, поэтому
+      связь переживает переименование учетной записи.
+    </p>
+  </div>
+  <a class="button secondary" href="/settings">Назад в настройки</a>
+</div>
+
+{% if source_error %}
+<div class="alert warning">{{ source_error }}</div>
+{% else %}
+<div class="mapping-source card">
+  <span>Текущий домен выгрузки 1С</span>
+  <strong>{{ source_domain }}</strong>
+  <span class="muted">
+    Домен берется из ZIMBRA_DOMAINS и определяется по e-mail работников.
+    ONEC_SOURCE_DOMAIN нужен только если определить домен однозначно нельзя.
+  </span>
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert error">{{ error }}</div>
+{% endif %}
+
+{% if result %}
+  {% if result.manual %}
+  <div class="alert success">
+    {% if result.manual.status == "not_needed" %}
+      Сопоставление не требуется: фактические логины AD и Zimbra уже одинаковы.
+    {% elif result.manual.status == "created" %}
+      Сопоставление для {{ result.manual.fio }} добавлено.
+    {% else %}
+      Сопоставление для {{ result.manual.fio }} обновлено.
+    {% endif %}
+  </div>
+  {% elif result.deleted %}
+  <div class="alert success">Сопоставление удалено.</div>
+  {% elif result.import %}
+  <div class="alert success mapping-import-summary">
+    Обработано строк: {{ result.import.total }}.
+    Добавлено: {{ result.import.created }}.
+    Обновлено: {{ result.import.updated }}.
+    Не требуется: {{ result.import.not_needed }}.
+    Ошибок: {{ result.import.errors|length }}.
+  </div>
+  {% if result.import.errors %}
+  <details class="card mapping-import-errors">
+    <summary>Ошибки импорта ({{ result.import.errors|length }})</summary>
+    <table class="journal-table">
+      <thead><tr><th>Строка</th><th>e-mail</th><th>Логин</th><th>Причина</th></tr></thead>
+      <tbody>
+        {% for item in result.import.errors %}
+        <tr>
+          <td>{{ item.row }}</td>
+          <td>{{ item.email }}</td>
+          <td>{{ item.login }}</td>
+          <td>{{ item.error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+  {% endif %}
+{% endif %}
+
+<div class="mapping-grid">
+  <section class="card">
+    <h2>Добавить вручную</h2>
+    <p class="muted">
+      Укажите e-mail из кадровой выгрузки и фактический логин AD.
+      Zimbra-ящик и внутренние идентификаторы система найдет сама.
+    </p>
+    <form method="post" action="/settings/email-login-mapping/add" class="mapping-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>
+        <span>e-mail из 1С</span>
+        <input type="email" name="source_email" required value="{{ prefill_email }}" placeholder="user@domain">
+      </label>
+      <label>
+        <span>Логин AD</span>
+        <input type="text" name="ad_login" required autocomplete="off" placeholder="ivanov.ii">
+      </label>
+      <button class="button" type="submit"{% if source_error %} disabled{% endif %}>Сохранить сопоставление</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Импорт XLSX</h2>
+    <p class="muted">
+      Используются две колонки: <strong>e-mail</strong> и <strong>логин</strong>.
+      Работник определяется по e-mail в текущем кадровом реестре.
+    </p>
+    <form method="post" action="/settings/email-login-mapping/import" enctype="multipart/form-data" class="mapping-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>
+        <span>Файл сопоставлений</span>
+        <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+      </label>
+      <button class="button" type="submit"{% if source_error %} disabled{% endif %}>Импортировать</button>
+    </form>
+  </section>
+</div>
+
+<section class="card table-wrap mapping-table-card">
+  <div class="mapping-table-heading">
+    <div>
+      <h2>Текущие сопоставления</h2>
+      <p class="muted">
+        Если фактические логины AD и Zimbra становятся одинаковыми,
+        запись удаляется автоматически при следующей сверке.
+        После подтвержденного увольнения запись также удаляется автоматически.
+      </p>
+    </div>
+    <span class="mapping-count">{{ mappings|length }}</span>
+  </div>
+
+  <table class="journal-table mapping-table">
+    <thead>
+      <tr>
+        <th>Работник</th>
+        <th>e-mail из 1С</th>
+        <th>Логин AD</th>
+        <th>Ящик Zimbra</th>
+        <th>Внутренняя связь</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in mappings %}
+      <tr>
+        <td>
+          <strong>{{ item.fio }}</strong>
+          {% if not item.present %}<div class="muted">Нет в текущей выгрузке</div>{% endif %}
+        </td>
+        <td>{{ item.source_email }}</td>
+        <td><code>{{ item.ad_login }}</code></td>
+        <td>{{ item.zimbra_email }}</td>
+        <td>
+          <details class="mapping-ids">
+            <summary>Показать ID</summary>
+            <div><strong>AD objectGUID</strong><code>{{ item.ad_object_guid }}</code></div>
+            <div><strong>Zimbra zimbraId</strong><code>{{ item.zimbra_id }}</code></div>
+          </details>
+        </td>
+        <td>
+          <form method="post" action="/settings/email-login-mapping/{{ item.id }}/delete" onsubmit="return confirm('Удалить сопоставление?');">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="button secondary small" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Сопоставлений пока нет.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

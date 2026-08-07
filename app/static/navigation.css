@@ -485,3 +485,97 @@
 
 /* Кадровый реестр и read-only сверка */
 .hr-reconciliation-card{margin-top:18px}.hr-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.hr-summary-grid>div{display:grid;gap:5px;padding:13px;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc}.hr-summary-grid span{color:#64748b;font-size:.86rem}.hr-summary-grid strong{font-size:1.3rem}.hr-summary-grid .good{background:#f0fdf4;border-color:#bbf7d0}.hr-summary-grid .warn{background:#fffbeb;border-color:#fde68a}.hr-summary-grid .bad{background:#fef2f2;border-color:#fecaca}.hr-issues-table-wrap{overflow-x:auto}.registry-state{display:inline-flex;align-items:center;max-width:220px;padding:4px 8px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:.82rem;white-space:nowrap}.registry-state.enabled,.registry-state.present,.registry-state.ok{background:#dcfce7;color:#166534}.registry-state.missing,.registry-state.disabled,.registry-state.no_login,.registry-state.no_email,.registry-state.issue{background:#fef3c7;color:#92400e}.registry-state.error{background:#fee2e2;color:#991b1b}.registry-state.not_checked{background:#e2e8f0;color:#475569}.button.small{padding:6px 10px;font-size:.84rem}.onec-registry-summary{margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0}.registry-filter{display:grid;grid-template-columns:minmax(260px,1fr) minmax(220px,300px) auto;align-items:end;gap:12px;margin:16px 0}.registry-filter label{display:grid;gap:6px}.registry-filter input,.registry-filter select{width:100%;padding:9px 10px;border:1px solid #cbd5e1;border-radius:7px;background:#fff}.registry-placement+.registry-placement{margin-top:5px}.registry-error{max-width:360px;margin-top:6px;color:#991b1b;font-size:.82rem;white-space:pre-wrap}.hr-registry-page-summary{margin-top:16px}@media(max-width:850px){.hr-summary-grid{grid-template-columns:1fr 1fr}.registry-filter{grid-template-columns:1fr}}
+
+
+/* Сопоставление e-mail и логина */
+.hr-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.registry-mapped {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+.mapping-source {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 16px 0;
+}
+.mapping-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+.mapping-grid h2 {
+  margin-top: 0;
+}
+.mapping-form {
+  display: grid;
+  gap: 12px;
+}
+.mapping-form label {
+  display: grid;
+  gap: 6px;
+}
+.mapping-form input[type="text"],
+.mapping-form input[type="email"],
+.mapping-form input[type="file"] {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+}
+.mapping-table-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.mapping-table-heading h2 {
+  margin-top: 0;
+}
+.mapping-count {
+  display: inline-flex;
+  min-width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-weight: 700;
+}
+.mapping-ids summary {
+  cursor: pointer;
+}
+.mapping-ids > div {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+}
+.mapping-ids code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.mapping-import-errors {
+  margin: 12px 0;
+}
+.mapping-import-errors summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+@media (max-width: 850px) {
+  .mapping-grid {
+    grid-template-columns: 1fr;
+  }
+  .mapping-source {
+    grid-template-columns: 1fr;
+  }
+}

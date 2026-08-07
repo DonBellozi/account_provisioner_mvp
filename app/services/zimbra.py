@@ -18,6 +18,14 @@ class ZimbraCreateResult:
     aliases: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ZimbraAccountIdentity:
+    zimbra_id: str
+    primary_email: str
+    login: str
+    addresses: tuple[str, ...]
+
+
 class BackgroundLoginCheckCancelled(RuntimeError):
     """Фоновая проверка альтернатив остановлена перед созданием учетных записей."""
 
@@ -469,49 +477,193 @@ class ZimbraService:
                 return False
             raise
 
-    def addresses_exist(self, emails: list[str]) -> set[str]:
-        """Найти точные адреса/алиасы Zimbra батчами, без изменений."""
-        if not self.settings.zimbra_check_enabled:
-            return set()
-        if self.settings.zimbra_backend == "disabled":
-            raise RuntimeError("Zimbra backend отключен")
-        normalized = list(dict.fromkeys(email.strip().lower() for email in emails if email.strip() and "@" in email))
-        if not normalized:
-            return set()
-        existing: set[str] = set()
+    @staticmethod
+    def _parse_search_accounts(
+        output: str,
+    ) -> list[ZimbraAccountIdentity]:
+        """Разобрать `zmprov sa -v` в карточки Zimbra."""
+        accounts: list[ZimbraAccountIdentity] = []
+        current_name = ""
+        attrs: dict[str, list[str]] = {}
+
+        def flush() -> None:
+            nonlocal current_name, attrs
+            if not current_name and not attrs:
+                return
+
+            zimbra_id = ""
+            primary_email = ""
+            addresses: list[str] = []
+
+            for value in attrs.get("zimbraid", []):
+                if value.strip():
+                    zimbra_id = value.strip()
+                    break
+
+            mail_values = attrs.get("mail", [])
+            if mail_values:
+                primary_email = mail_values[0].strip().lower()
+
+            if not primary_email and current_name:
+                primary_email = current_name.strip().lower()
+
+            for key in (
+                "mail",
+                "zimbramailalias",
+                "zimbramaildeliveryaddress",
+            ):
+                for value in attrs.get(key, []):
+                    normalized = value.strip().lower()
+                    if normalized and normalized not in addresses:
+                        addresses.append(normalized)
+
+            if primary_email and primary_email not in addresses:
+                addresses.insert(0, primary_email)
+
+            if zimbra_id and primary_email:
+                login = primary_email.split("@", 1)[0].lower()
+                accounts.append(
+                    ZimbraAccountIdentity(
+                        zimbra_id=zimbra_id,
+                        primary_email=primary_email,
+                        login=login,
+                        addresses=tuple(addresses),
+                    )
+                )
+
+            current_name = ""
+            attrs = {}
+
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if line.lower().startswith("# name "):
+                flush()
+                current_name = line[7:].strip()
+                continue
+
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            attrs.setdefault(key.strip().lower(), []).append(value.strip())
+
+        flush()
+        return accounts
+
+    def _search_accounts(
+        self,
+        ldap_query: str,
+        *,
+        expected_count: int,
+    ) -> list[ZimbraAccountIdentity]:
         client = self._client()
         try:
-            for offset in range(0, len(normalized), 100):
-                chunk = normalized[offset:offset + 100]
-                wanted = set(chunk)
-                clauses=[]
-                for address in chunk:
-                    escaped=self._escape_ldap_filter_value(address)
-                    clauses.extend([f"(mail={escaped})",f"(zimbraMailAlias={escaped})",f"(zimbraMailDeliveryAddress={escaped})"])
-                query=f"(|{''.join(clauses)})"
-                try:
-                    output=self._execute_zmprov_lookup(client,["sa","-v",query,str(max(20,len(chunk)*2))])
-                    interesting={"mail","zimbramailalias","zimbramaildeliveryaddress","name"}
-                    for raw_line in output.splitlines():
-                        line=raw_line.strip()
-                        if not line: continue
-                        value=""
-                        if line.lower().startswith("# name "): value=line[7:].strip()
-                        elif ":" in line:
-                            attribute,candidate=line.split(":",1)
-                            if attribute.strip().lower() in interesting: value=candidate.strip()
-                        value=value.lower()
-                        if value in wanted: existing.add(value)
-                except RuntimeError:
-                    for address in chunk:
-                        try:
-                            self._execute_zmprov_lookup(client,["ga",address,"zimbraId"]); existing.add(address)
-                        except RuntimeError as exc:
-                            if self._is_not_found_error(exc): continue
-                            raise
+            output = self._execute_zmprov_lookup(
+                client,
+                [
+                    "sa",
+                    "-v",
+                    ldap_query,
+                    str(max(20, min(expected_count * 2, 500))),
+                ],
+            )
+            return self._parse_search_accounts(output)
         finally:
             client.close()
-        return existing
+
+    def accounts_by_addresses(
+        self,
+        emails: list[str],
+    ) -> dict[str, ZimbraAccountIdentity]:
+        """Разрешить e-mail/alias в стабильную карточку Zimbra пакетно."""
+        if not self.settings.zimbra_check_enabled:
+            return {}
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+
+        normalized = list(
+            dict.fromkeys(
+                email.strip().lower()
+                for email in emails
+                if email.strip() and "@" in email
+            )
+        )
+        if not normalized:
+            return {}
+
+        result: dict[str, ZimbraAccountIdentity] = {}
+        for offset in range(0, len(normalized), 50):
+            chunk = normalized[offset:offset + 50]
+            clauses: list[str] = []
+            for address in chunk:
+                escaped = self._escape_ldap_filter_value(address)
+                clauses.extend(
+                    [
+                        f"(mail={escaped})",
+                        f"(zimbraMailAlias={escaped})",
+                        f"(zimbraMailDeliveryAddress={escaped})",
+                    ]
+                )
+            accounts = self._search_accounts(
+                f"(|{''.join(clauses)})",
+                expected_count=len(chunk),
+            )
+            for account in accounts:
+                for address in account.addresses:
+                    if address in chunk:
+                        result[address] = account
+        return result
+
+    def accounts_by_ids(
+        self,
+        zimbra_ids: list[str],
+    ) -> dict[str, ZimbraAccountIdentity]:
+        """Получить Zimbra-карточки по стабильным zimbraId пакетно."""
+        if not self.settings.zimbra_check_enabled:
+            return {}
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+
+        normalized = list(
+            dict.fromkeys(
+                str(value or "").strip()
+                for value in zimbra_ids
+                if str(value or "").strip()
+            )
+        )
+        if not normalized:
+            return {}
+
+        result: dict[str, ZimbraAccountIdentity] = {}
+        for offset in range(0, len(normalized), 100):
+            chunk = normalized[offset:offset + 100]
+            clauses = [
+                f"(zimbraId={self._escape_ldap_filter_value(value)})"
+                for value in chunk
+            ]
+            accounts = self._search_accounts(
+                f"(|{''.join(clauses)})",
+                expected_count=len(chunk),
+            )
+            for account in accounts:
+                if account.zimbra_id in chunk:
+                    result[account.zimbra_id] = account
+        return result
+
+    def account_by_address(
+        self,
+        email: str,
+    ) -> ZimbraAccountIdentity | None:
+        normalized = str(email or "").strip().lower()
+        if not normalized:
+            return None
+        return self.accounts_by_addresses([normalized]).get(normalized)
+
+    def addresses_exist(self, emails: list[str]) -> set[str]:
+        return set(self.accounts_by_addresses(emails))
+
 
     def logins_exist_any_domain(
         self,

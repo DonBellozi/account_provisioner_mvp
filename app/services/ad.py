@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import ssl
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from ldap3 import ALL, NTLM, SIMPLE, Connection, MODIFY_ADD, MODIFY_REPLACE, Server, Tls
 from ldap3.core.exceptions import LDAPException
-from ldap3.utils.conv import escape_filter_chars
+from ldap3.utils.conv import escape_bytes, escape_filter_chars
 from ldap3.utils.dn import escape_rdn
 
 from app.config import Settings
@@ -28,6 +29,7 @@ class ADDirectoryUser:
     email: str
     distinguished_name: str
     is_enabled: bool
+    object_guid: str = ""
 
 
 class ActiveDirectoryService:
@@ -148,12 +150,19 @@ class ActiveDirectoryService:
         email = str(cls._entry_value(entry, "mail", "") or "").strip()
         user_account_control = int(cls._entry_value(entry, "userAccountControl", 0) or 0)
 
+        raw_guid = cls._entry_value(entry, "objectGUID", "")
+        if isinstance(raw_guid, bytes) and len(raw_guid) == 16:
+            object_guid = str(uuid.UUID(bytes_le=raw_guid))
+        else:
+            object_guid = str(raw_guid or "").strip().strip("{}").lower()
+
         return ADDirectoryUser(
             username=username,
             display_name=display_name,
             email=email,
             distinguished_name=str(entry.entry_dn),
             is_enabled=(user_account_control & 2) == 0,
+            object_guid=object_guid,
         )
 
     def search_users(self, query: str, limit: int = 20) -> list[ADDirectoryUser]:
@@ -181,6 +190,7 @@ class ActiveDirectoryService:
                     "mail",
                     "userAccountControl",
                     "distinguishedName",
+                    "objectGUID",
                 ],
                 size_limit=max(1, min(limit, 50)),
             )
@@ -215,6 +225,7 @@ class ActiveDirectoryService:
                     "mail",
                     "userAccountControl",
                     "distinguishedName",
+                    "objectGUID",
                 ],
                 size_limit=1,
             )
@@ -266,12 +277,72 @@ class ActiveDirectoryService:
             for offset in range(0, len(normalized), 200):
                 chunk = normalized[offset:offset + 200]
                 alternatives = "".join(f"(sAMAccountName={escape_filter_chars(login)})" for login in chunk)
-                conn.search(self.settings.ad_base_dn, f"(&(objectCategory=person)(objectClass=user)(|{alternatives}))", attributes=["sAMAccountName","displayName","mail","userAccountControl","distinguishedName"], size_limit=len(chunk))
+                conn.search(self.settings.ad_base_dn, f"(&(objectCategory=person)(objectClass=user)(|{alternatives}))", attributes=["sAMAccountName","displayName","mail","userAccountControl","distinguishedName","objectGUID"], size_limit=len(chunk))
                 for entry in conn.entries:
                     user = self._entry_to_directory_user(entry)
                     if user is not None:
                         result[user.username] = user
         return result
+
+    def users_by_object_guids(
+        self,
+        object_guids: list[str],
+    ) -> dict[str, ADDirectoryUser]:
+        """Получить AD-пользователей по стабильным objectGUID пакетно."""
+        if not self.settings.ad_check_enabled:
+            return {}
+
+        normalized: list[str] = []
+        for value in object_guids:
+            text = str(value or "").strip().strip("{}").lower()
+            if not text:
+                continue
+            try:
+                text = str(uuid.UUID(text))
+            except ValueError:
+                continue
+            if text not in normalized:
+                normalized.append(text)
+
+        if not normalized:
+            return {}
+
+        result: dict[str, ADDirectoryUser] = {}
+        with self._service_connection() as conn:
+            for offset in range(0, len(normalized), 100):
+                chunk = normalized[offset:offset + 100]
+                clauses = []
+                for guid_text in chunk:
+                    guid_bytes = uuid.UUID(guid_text).bytes_le
+                    clauses.append(f"(objectGUID={escape_bytes(guid_bytes)})")
+                search_filter = (
+                    "(&(objectCategory=person)(objectClass=user)"
+                    f"(|{''.join(clauses)}))"
+                )
+                conn.search(
+                    self.settings.ad_base_dn,
+                    search_filter,
+                    attributes=[
+                        "sAMAccountName",
+                        "displayName",
+                        "mail",
+                        "userAccountControl",
+                        "distinguishedName",
+                        "objectGUID",
+                    ],
+                    size_limit=len(chunk),
+                )
+                for entry in conn.entries:
+                    user = self._entry_to_directory_user(entry)
+                    if user is not None and user.object_guid:
+                        result[user.object_guid.lower()] = user
+        return result
+
+    def get_user_by_object_guid(self, object_guid: str) -> ADDirectoryUser | None:
+        normalized = str(object_guid or "").strip().strip("{}").lower()
+        if not normalized:
+            return None
+        return self.users_by_object_guids([normalized]).get(normalized)
 
 
     def create_disabled_user(
