@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
-from app.routers import admin, auth, employees
+from app.routers import admin, auth, employees, onec, settings_ui
 from app.security import CSRFMismatchError, ensure_bootstrap_admin
 
 settings = get_settings()
@@ -37,6 +37,8 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(auth.router)
 app.include_router(employees.router)
+app.include_router(onec.router)
+app.include_router(settings_ui.router)
 app.include_router(admin.router)
 
 
