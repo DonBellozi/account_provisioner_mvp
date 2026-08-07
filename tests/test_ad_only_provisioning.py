@@ -395,5 +395,38 @@ class ADOnlyProvisioningTests(unittest.TestCase):
 
 
 
+    @patch("app.services.provisioning.get_domain_mail_profile")
+    def test_second_ad_creation_request_is_rejected_while_first_is_running(self, profile):
+        profile.return_value = SimpleNamespace(domain="org.com")
+        service = self.service()
+
+        preflight = service.prepare_ad_for_existing_mailbox(
+            self.db,
+            self.record.id,
+        )
+        lock = service._ad_only_lock_for_login(preflight.login)
+        self.assertTrue(lock.acquire(blocking=False))
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "уже выполняется",
+            ):
+                service.provision_ad_for_existing_mailbox(
+                    self.db,
+                    "admin",
+                    self.record.id,
+                )
+        finally:
+            service._release_ad_only_lock(preflight.login, lock)
+
+    def test_ad_only_lock_is_shared_between_service_instances(self):
+        first = self.service()
+        second = self.service()
+        lock1 = first._ad_only_lock_for_login("Abacumova.AV")
+        lock2 = second._ad_only_lock_for_login("abacumova.av")
+        self.assertIs(lock1, lock2)
+
+
+
 if __name__ == "__main__":
     unittest.main()

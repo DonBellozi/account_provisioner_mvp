@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import threading
 import re
 from urllib.parse import urlencode
 
@@ -100,6 +101,34 @@ class ProvisioningCredentials:
 
 
 class ProvisioningService:
+    # Защита от двойного POST по одной и той же учетной записи.
+    # UI блокирует кнопку сразу, но сервер не должен доверять браузеру:
+    # повторный запрос, Enter, обновление страницы или два окна не должны
+    # одновременно запускать создание одного sAMAccountName.
+    _ad_only_locks_guard = threading.Lock()
+    _ad_only_locks: dict[str, threading.Lock] = {}
+
+    @classmethod
+    def _ad_only_lock_for_login(cls, login: str) -> threading.Lock:
+        normalized = str(login or "").strip().lower()
+        with cls._ad_only_locks_guard:
+            lock = cls._ad_only_locks.get(normalized)
+            if lock is None:
+                lock = threading.Lock()
+                cls._ad_only_locks[normalized] = lock
+            return lock
+
+    @classmethod
+    def _release_ad_only_lock(cls, login: str, lock: threading.Lock) -> None:
+        lock.release()
+        normalized = str(login or "").strip().lower()
+        with cls._ad_only_locks_guard:
+            current = cls._ad_only_locks.get(normalized)
+            # Удаляем только свободный именно тот lock, который создавали.
+            # Если другой запрос уже успел его захватить, запись остается.
+            if current is lock and not lock.locked():
+                cls._ad_only_locks.pop(normalized, None)
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.ad = ActiveDirectoryService(settings)
@@ -623,8 +652,8 @@ class ProvisioningService:
         *,
         confirm_name_candidates: bool = False,
     ) -> ADOnlyProvisioningCredentials:
-        # Перед изменением повторяем все проверки: данные реестра и состояние
-        # внешних систем могли измениться с момента открытия страницы.
+        # Первая проверка нужна, чтобы определить точный логин из существующего
+        # e-mail. Затем берем серверную блокировку именно на этот sAMAccountName.
         preflight = self.prepare_ad_for_existing_mailbox(db, record_id)
         if not preflight.can_create:
             raise RuntimeError(preflight.block_reason)
@@ -634,6 +663,43 @@ class ProvisioningService:
                 "Подтвердите, что это другие люди, либо выполните сопоставление."
             )
 
+        creation_lock = self._ad_only_lock_for_login(preflight.login)
+        if not creation_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "Создание этой учетной записи AD уже выполняется. "
+                "Дождитесь завершения текущей операции."
+            )
+
+        try:
+            # Критически важная повторная проверка уже ВНУТРИ блокировки.
+            # Если первый запрос успел создать AD, второй увидит существующую
+            # учетную запись и завершится без повторного создания.
+            preflight = self.prepare_ad_for_existing_mailbox(db, record_id)
+            if not preflight.can_create:
+                raise RuntimeError(preflight.block_reason)
+            if preflight.name_candidates and not confirm_name_candidates:
+                raise RuntimeError(
+                    "В AD найдены возможные совпадения по ФИО. "
+                    "Подтвердите, что это другие люди, либо выполните сопоставление."
+                )
+
+            return self._provision_ad_for_existing_mailbox_locked(
+                db,
+                operator,
+                record_id,
+                preflight=preflight,
+            )
+        finally:
+            self._release_ad_only_lock(preflight.login, creation_lock)
+
+    def _provision_ad_for_existing_mailbox_locked(
+        self,
+        db: Session,
+        operator: str,
+        record_id: int,
+        *,
+        preflight: ExistingMailboxADPreflight,
+    ) -> ADOnlyProvisioningCredentials:
         record = db.get(HRSourceRecord, record_id)
         if record is None or not record.is_present:
             raise RuntimeError("Работник больше не присутствует в кадровом реестре")

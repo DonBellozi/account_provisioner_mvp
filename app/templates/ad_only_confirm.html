@@ -1,5 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Создание учетной записи AD{% endblock %}
+{% block title %}Создание учетной записи AD
+<script>
+function submitAdOnlyOnce(form) {
+  if (form.dataset.submitting === 'true') {
+    return false;
+  }
+
+  form.dataset.submitting = 'true';
+  const button = form.querySelector('[data-create-ad-submit]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Создание...';
+  }
+  return true;
+}
+</script>
+{% endblock %}
 {% block content %}
 <div class="heading-row">
   <div>
@@ -132,7 +148,10 @@
 {% endif %}
 
 {% if preflight.can_create %}
-<form method="post" action="/employees/registry/{{ preflight.record_id }}/create-ad" class="card ad-only-create-form">
+<form method="post"
+      action="/employees/registry/{{ preflight.record_id }}/create-ad"
+      class="card ad-only-create-form"
+      onsubmit="return submitAdOnlyOnce(this);">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   {% if preflight.name_candidates %}
   <label class="check-row ad-only-confirm-check">
@@ -147,7 +166,7 @@
   {% endif %}
 
   <div class="actions ad-only-actions">
-    <button class="button" type="submit">Создать AD</button>
+    <button class="button" type="submit" data-create-ad-submit>Создать AD</button>
     <a class="button secondary" href="/employees/registry">Отмена</a>
   </div>
 </form>
