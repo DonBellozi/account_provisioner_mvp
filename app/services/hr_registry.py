@@ -502,10 +502,18 @@ class HRRegistryService:
         q = query.strip().casefold()
         rows: list[dict] = []
         for record in records:
+            mapping = mappings.get(record.worker_key)
+            effective_login = (
+                mapping.ad_login.strip().lower()
+                if mapping is not None and mapping.ad_login.strip()
+                else record.login
+            )
+
             if q and q not in " ".join(
                 [
                     record.fio,
                     record.login,
+                    effective_login,
                     record.corporate_email,
                 ]
             ).casefold():
@@ -552,7 +560,6 @@ class HRRegistryService:
                 if label:
                     placement_labels.append(label)
 
-            mapping = mappings.get(record.worker_key)
             create_url = ""
             if (
                 record.ad_status == "missing"
@@ -582,7 +589,12 @@ class HRRegistryService:
                     "fio": record.fio,
                     "source_name": record.source_name,
                     "email": record.corporate_email,
-                    "login": record.login,
+                    # В реестре показываем фактический логин AD из явного
+                    # сопоставления. Логин, вычисленный из e-mail 1С,
+                    # остается только исходным кандидатом.
+                    "login": effective_login,
+                    "source_login": record.login,
+                    "login_from_mapping": mapping is not None,
                     "placements": placement_labels,
                     "ad_status": record.ad_status,
                     "ad_label": AD_LABELS.get(

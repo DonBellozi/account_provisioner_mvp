@@ -115,5 +115,23 @@ class RegistryMappingTests(unittest.TestCase):
         self.assertEqual(self.db.query(EmailLoginMapping).count(), 0)
 
 
+    @patch("app.services.hr_registry.ZimbraService")
+    @patch("app.services.hr_registry.ActiveDirectoryService")
+    def test_list_rows_uses_mapped_ad_login(self, ad_cls, z_cls):
+        # list_rows is a display/read operation and must use the explicit
+        # exception mapping instead of the login guessed from the 1C e-mail.
+        service = HRRegistryService(self.settings, self.db)
+        rows = service.list_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_login"], "boss")
+        self.assertEqual(rows[0]["login"], "ivanov.ii")
+        self.assertTrue(rows[0]["login_from_mapping"])
+
+        # Search must also find the worker by the mapped AD login.
+        mapped_search = service.list_rows(query="ivanov.ii")
+        self.assertEqual(len(mapped_search), 1)
+
+
+
 if __name__ == "__main__":
     unittest.main()
