@@ -267,6 +267,46 @@ class CredentialMailer:
             except smtplib.SMTPException:
                 client.close()
 
+    def test_connection(self) -> str:
+        """Проверить SMTP, TLS и аутентификацию без отправки письма."""
+        if not self.settings.smtp_host:
+            raise RuntimeError("Не заполнены настройки SMTP")
+
+        if self.settings.smtp_ssl:
+            client: smtplib.SMTP = smtplib.SMTP_SSL(
+                self.settings.smtp_host,
+                self.settings.smtp_port,
+                timeout=self.settings.smtp_timeout_seconds,
+                context=ssl.create_default_context(),
+            )
+        else:
+            client = smtplib.SMTP(
+                self.settings.smtp_host,
+                self.settings.smtp_port,
+                timeout=self.settings.smtp_timeout_seconds,
+            )
+
+        try:
+            client.ehlo()
+            if self.settings.smtp_starttls and not self.settings.smtp_ssl:
+                client.starttls(context=ssl.create_default_context())
+                client.ehlo()
+            if self.settings.smtp_username:
+                client.login(
+                    self.settings.smtp_username,
+                    self.settings.smtp_password,
+                )
+            code, _ = client.noop()
+            if int(code) >= 400:
+                raise RuntimeError(f"SMTP NOOP вернул код {code}")
+        finally:
+            try:
+                client.quit()
+            except smtplib.SMTPException:
+                client.close()
+
+        return "Подключение к SMTP и аутентификация выполнены успешно"
+
     def _send(
         self,
         recipient: str,

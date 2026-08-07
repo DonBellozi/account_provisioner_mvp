@@ -73,6 +73,13 @@ class ActiveDirectoryService:
         )
         return conn
 
+    def test_connection(self) -> str:
+        """Проверить LDAPS/LDAP-подключение и bind сервисной учетной записи."""
+        with self._service_connection() as conn:
+            if not conn.bound:
+                raise RuntimeError("Подключение к AD установлено, но bind не выполнен")
+        return "Подключение к Active Directory и bind выполнены успешно"
+
     def authenticate_operator(self, username: str, password: str) -> bool:
         """Проверить пароль доменного пользователя.
 

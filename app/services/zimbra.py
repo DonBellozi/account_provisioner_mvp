@@ -433,6 +433,27 @@ class ZimbraService:
                     raise
         return existing
 
+    def test_connection(self) -> str:
+        """Проверить SSH и выполнение безопасной команды zmprov."""
+        if self.settings.zimbra_backend == "disabled":
+            raise RuntimeError("Zimbra backend отключен")
+
+        client = self._client()
+        try:
+            output = self._execute_zmprov_direct(
+                client,
+                ["gcf", "zimbraDefaultDomainName"],
+            )
+        finally:
+            client.close()
+
+        for line in output.splitlines():
+            if line.lower().startswith("zimbradefaultdomainname:"):
+                domain = line.split(":", 1)[1].strip()
+                if domain:
+                    return f"SSH и zmprov доступны. Основной домен Zimbra: {domain}"
+        return "SSH и zmprov доступны"
+
     def address_exists(self, email: str) -> bool:
         if not self.settings.zimbra_check_enabled:
             return False

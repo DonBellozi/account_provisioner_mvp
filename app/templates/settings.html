@@ -5,13 +5,152 @@
   <div>
     <h1>Настройки</h1>
     <p class="muted settings-lead">
-      Служебные разделы и параметры интеграций собраны в одном месте.
+      Параметры подключения к действующим системам читаются из окружения.
+      Секреты в Web не отображаются и здесь не изменяются.
     </p>
   </div>
 </div>
 
 <section class="settings-section">
-  <h2>Доступ и уведомления</h2>
+  <h2>Интеграции</h2>
+
+  <div class="integration-list">
+    <article class="integration-card">
+      <div class="integration-card-heading">
+        <div>
+          <h3>Active Directory</h3>
+          <span class="integration-badge{% if integrations.ad.configured %} active{% endif %}"
+                id="integration-badge-ad">
+            {{ integrations.ad.badge }}
+          </span>
+        </div>
+        <button class="button secondary integration-test"
+                type="button"
+                data-integration="ad">
+          Проверить подключение
+        </button>
+      </div>
+      <dl class="integration-details">
+        <dt>Сервер</dt><dd>{{ integrations.ad.server }}</dd>
+        <dt>Порт</dt><dd>{{ integrations.ad.port }}</dd>
+        <dt>LDAPS / SSL</dt><dd>{{ integrations.ad.ssl }}</dd>
+        <dt>Проверка TLS</dt><dd>{{ integrations.ad.verify_tls }}</dd>
+        <dt>Base DN</dt><dd><code>{{ integrations.ad.base_dn }}</code></dd>
+        <dt>OU работников</dt><dd><code>{{ integrations.ad.users_ou }}</code></dd>
+        <dt>Bind DN</dt><dd><code>{{ integrations.ad.bind_dn }}</code></dd>
+        <dt>Пароль</dt><dd>{{ integrations.ad.password }}</dd>
+        <dt>CA-файл</dt><dd>{{ integrations.ad.ca_file }}</dd>
+        <dt>Проверка логинов</dt><dd>{{ integrations.ad.check_enabled }}</dd>
+      </dl>
+      <div class="integration-test-result" id="integration-result-ad"></div>
+    </article>
+
+    <article class="integration-card">
+      <div class="integration-card-heading">
+        <div>
+          <h3>Zimbra</h3>
+          <span class="integration-badge{% if integrations.zimbra.configured %} active{% endif %}"
+                id="integration-badge-zimbra">
+            {{ integrations.zimbra.badge }}
+          </span>
+        </div>
+        <button class="button secondary integration-test"
+                type="button"
+                data-integration="zimbra">
+          Проверить подключение
+        </button>
+      </div>
+      <dl class="integration-details">
+        <dt>Сервер</dt><dd>{{ integrations.zimbra.server }}</dd>
+        <dt>Порт</dt><dd>{{ integrations.zimbra.port }}</dd>
+        <dt>Пользователь SSH</dt><dd>{{ integrations.zimbra.user }}</dd>
+        <dt>Авторизация</dt><dd>{{ integrations.zimbra.auth }}</dd>
+        <dt>Пароль</dt><dd>{{ integrations.zimbra.password }}</dd>
+        <dt>SSH-ключ</dt><dd>{{ integrations.zimbra.private_key }}</dd>
+        <dt>known_hosts</dt><dd>{{ integrations.zimbra.known_hosts }}</dd>
+        <dt>Backend</dt><dd><code>{{ integrations.zimbra.backend }}</code></dd>
+        <dt>Домены</dt><dd>{{ integrations.zimbra.domains }}</dd>
+        <dt>Проверка логинов</dt><dd>{{ integrations.zimbra.check_enabled }}</dd>
+      </dl>
+      <div class="integration-test-result" id="integration-result-zimbra"></div>
+    </article>
+
+    <article class="integration-card">
+      <div class="integration-card-heading">
+        <div>
+          <h3>SMTP</h3>
+          <span class="integration-badge{% if integrations.smtp.configured %} active{% endif %}"
+                id="integration-badge-smtp">
+            {{ integrations.smtp.badge }}
+          </span>
+        </div>
+        <button class="button secondary integration-test"
+                type="button"
+                data-integration="smtp">
+          Проверить подключение
+        </button>
+      </div>
+      <dl class="integration-details">
+        <dt>Сервер</dt><dd>{{ integrations.smtp.server }}</dd>
+        <dt>Порт</dt><dd>{{ integrations.smtp.port }}</dd>
+        <dt>Шифрование</dt><dd>{{ integrations.smtp.mode }}</dd>
+        <dt>Пользователь</dt><dd>{{ integrations.smtp.username }}</dd>
+        <dt>Пароль</dt><dd>{{ integrations.smtp.password }}</dd>
+        <dt>Тайм-аут</dt><dd>{{ integrations.smtp.timeout }}</dd>
+        <dt>Повторных попыток</dt><dd>{{ integrations.smtp.retries }}</dd>
+      </dl>
+      <p class="muted integration-note">
+        Проверка устанавливает SMTP-соединение и выполняет аутентификацию.
+        Тестовое письмо не отправляется.
+      </p>
+      <div class="integration-test-result" id="integration-result-smtp"></div>
+    </article>
+
+    <article class="integration-card integration-card-future">
+      <div class="integration-card-heading">
+        <div>
+          <h3>1С / кадровая выгрузка</h3>
+          <span class="integration-badge">Не настроено</span>
+        </div>
+      </div>
+      <p>
+        Получение XLSX из почты, безопасный импорт и анализ окончательных
+        увольнений будут подключены следующим этапом.
+      </p>
+    </article>
+
+    <article class="integration-card integration-card-future">
+      <div class="integration-card-heading">
+        <div>
+          <h3>IT Invent</h3>
+          <span class="integration-badge">Не настроено</span>
+        </div>
+      </div>
+      <p>
+        Будет использоваться как справочная проверка наличия техники
+        у увольняющегося работника. Результат не будет блокировать увольнение
+        или отправку стандартного уведомления.
+      </p>
+    </article>
+  </div>
+</section>
+
+<section class="settings-section">
+  <h2>Уведомления</h2>
+  <div class="settings-grid">
+    <a class="settings-card-link" href="/admin/mail-templates">
+      <span class="settings-card-title">Шаблоны писем</span>
+      <span class="settings-card-description">
+        Отправители и тексты писем с реквизитами почты и Active Directory.
+        Позже здесь появится стандартное письмо увольняющемуся работнику.
+      </span>
+      <span class="settings-card-action">Открыть →</span>
+    </a>
+  </div>
+</section>
+
+<section class="settings-section">
+  <h2>Безопасность</h2>
   <div class="settings-grid">
     <a class="settings-card-link" href="/admin/access">
       <span class="settings-card-title">Доступ</span>
@@ -20,59 +159,62 @@
       </span>
       <span class="settings-card-action">Открыть →</span>
     </a>
-
-    <a class="settings-card-link" href="/admin/mail-templates">
-      <span class="settings-card-title">Шаблоны писем</span>
-      <span class="settings-card-description">
-        Отправители и шаблоны писем с реквизитами для почты и AD.
-      </span>
-      <span class="settings-card-action">Открыть →</span>
-    </a>
   </div>
 </section>
 
-<section class="settings-section">
-  <h2>Интеграции</h2>
-  <div class="settings-grid">
-    <div class="settings-card-placeholder">
-      <span class="settings-card-title">Active Directory</span>
-      <span class="settings-card-description">
-        Подключение, OU, параметры создания и проверки учетных записей.
-      </span>
-      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
-    </div>
+<input type="hidden" id="settings-csrf" value="{{ csrf }}">
 
-    <div class="settings-card-placeholder">
-      <span class="settings-card-title">Zimbra</span>
-      <span class="settings-card-description">
-        SSH-подключение, домены, алиасы и параметры создания почтовых ящиков.
-      </span>
-      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
-    </div>
+<script>
+(() => {
+  const csrf = document.getElementById('settings-csrf')?.value || '';
 
-    <div class="settings-card-placeholder">
-      <span class="settings-card-title">SMTP</span>
-      <span class="settings-card-description">
-        Сервер исходящей почты и техническая учетная запись отправителя.
-      </span>
-      <span class="settings-card-state">Пока настраивается через .env / Portainer</span>
-    </div>
+  document.querySelectorAll('.integration-test').forEach(button => {
+    button.addEventListener('click', async () => {
+      const integration = button.dataset.integration;
+      const result = document.getElementById(`integration-result-${integration}`);
+      const badge = document.getElementById(`integration-badge-${integration}`);
+      const originalText = button.textContent;
 
-    <div class="settings-card-placeholder">
-      <span class="settings-card-title">1С / кадровая выгрузка</span>
-      <span class="settings-card-description">
-        IMAP, отправитель, имя XLSX и параметры безопасного импорта.
-      </span>
-      <span class="settings-card-state">Следующий этап</span>
-    </div>
+      button.disabled = true;
+      button.textContent = 'Проверяю...';
+      result.className = 'integration-test-result checking';
+      result.textContent = 'Выполняется проверка подключения...';
 
-    <div class="settings-card-placeholder">
-      <span class="settings-card-title">IT Invent</span>
-      <span class="settings-card-description">
-        Проверка оборудования, числящегося за увольняемым работником.
-      </span>
-      <span class="settings-card-state">Запланировано</span>
-    </div>
-  </div>
-</section>
+      try {
+        const body = new URLSearchParams({csrf});
+        const response = await fetch(
+          `/settings/test-integration/${encodeURIComponent(integration)}`,
+          {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body,
+          }
+        );
+        const payload = await response.json();
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Ошибка проверки подключения');
+        }
+
+        result.className = 'integration-test-result success';
+        result.textContent = payload.message || 'Подключение работает.';
+        if (badge) {
+          badge.className = 'integration-badge active';
+          badge.textContent = 'Работает';
+        }
+      } catch (error) {
+        result.className = 'integration-test-result error';
+        result.textContent = error.message || String(error);
+        if (badge) {
+          badge.className = 'integration-badge error';
+          badge.textContent = 'Ошибка';
+        }
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    });
+  });
+})();
+</script>
 {% endblock %}

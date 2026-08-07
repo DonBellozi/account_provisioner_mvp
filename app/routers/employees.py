@@ -153,7 +153,11 @@ def _dismissal_journal_item(schedule: DismissalSchedule) -> dict[str, object]:
 
 
 @router.get("/")
-def dashboard(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
     provisioning_operations = db.scalars(
         select(ProvisioningOperation)
         .order_by(desc(ProvisioningOperation.created_at))
@@ -172,12 +176,61 @@ def dashboard(request: Request, db: Session = Depends(get_db), settings: Setting
     journal_items.sort(key=lambda item: item["created_at"], reverse=True)
     journal_items = journal_items[:50]
 
+    # Пока кадровая выгрузка 1С еще не подключена, блок ближайших увольнений
+    # строится по действующим ручным пометкам раздела «Увольнение».
+    # Если один логин отмечался несколько раз, актуальной считаем последнюю
+    # созданную запись. После подключения 1С источник этого блока будет заменен
+    # на рассчитанные окончательные увольнения по всем кадровым назначениям.
+    recent_dismissals = db.scalars(
+        select(DismissalSchedule)
+        .order_by(desc(DismissalSchedule.created_at))
+        .limit(500)
+    ).all()
+
+    latest_by_login: dict[str, DismissalSchedule] = {}
+    for schedule in recent_dismissals:
+        key = schedule.login.strip().lower()
+        if key and key not in latest_by_login:
+            latest_by_login[key] = schedule
+
+    today = date.today()
+    upcoming_dismissals = [
+        {
+            "record_id": schedule.id,
+            "dismissal_date": schedule.dismissal_date,
+            "login": schedule.login,
+            "corporate_email": schedule.corporate_email,
+            "subject": schedule.corporate_email or schedule.login,
+            "itinvent_label": "Не настроено",
+            "itinvent_state": "neutral",
+            "notification_label": (
+                "DRY RUN"
+                if settings.dry_run
+                else "Не настроено"
+            ),
+            "notification_state": (
+                "dry-run"
+                if settings.dry_run
+                else "neutral"
+            ),
+        }
+        for schedule in latest_by_login.values()
+        if schedule.dismissal_date >= today
+    ]
+    upcoming_dismissals.sort(
+        key=lambda item: (
+            item["dismissal_date"],
+            str(item["subject"]).casefold(),
+        )
+    )
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         _context(
             request,
             journal_items=journal_items,
+            upcoming_dismissals=upcoming_dismissals,
             dry_run=settings.dry_run,
         ),
     )
