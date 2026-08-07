@@ -579,3 +579,37 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Кадровый реестр: даем таблице больше горизонтального пространства.
+   Остальные страницы сохраняют стандартную ширину контейнера. */
+.registry-table-card {
+  width: min(1400px, calc(100vw - 36px));
+  max-width: none;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  overflow-x: auto;
+}
+
+.registry-table {
+  min-width: 1120px;
+}
+
+.registry-table th:last-child,
+.registry-table td:last-child {
+  width: 130px;
+  min-width: 130px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.registry-table td:last-child .button,
+.registry-table td:last-child .registry-mapped {
+  max-width: 100%;
+}
+
+@media (max-width: 1150px) {
+  .registry-table-card {
+    width: calc(100vw - 24px);
+  }
+}
+
